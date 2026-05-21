@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 本地调试：模拟器 10.0.2.2、真机局域网 HTTP -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
