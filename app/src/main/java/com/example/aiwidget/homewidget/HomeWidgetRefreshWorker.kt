@@ -130,7 +130,14 @@ class HomeWidgetRefreshWorker(
                     TAG,
                     "widget展示 task=${task.id} title=$title | summary=${summary.take(120)}",
                 )
-                widgetCache.saveSuccess(cacheSlot, title, summary, timeLabel, finishedAtMs)
+                widgetCache.saveSuccess(
+                    cacheSlot,
+                    title,
+                    summary,
+                    result.content,
+                    timeLabel,
+                    finishedAtMs,
+                )
                 HomeWidgetCoordinator.renderAllWidgets(applicationContext)
                 AppLog.d(TAG, "刷新成功 task=${task.id} slot=$cacheSlot")
                 Result.success()

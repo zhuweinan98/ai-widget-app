@@ -1,6 +1,9 @@
 package com.example.aiwidget.app
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,11 +17,17 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
@@ -41,16 +50,85 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aiwidget.data.Presets
 
 /**
- * App 内界面导航外壳：按 [AppShellUiState.route] 在对话页与设置页之间切换。
- *
- * 桌面小组件 UI 在 `homewidget/` + `res/layout/widget_layout.xml`，不在此包。
+ * App 外壳：底部 Tab（原文 / 消息 / 我的）固定，上方内容区平滑切换。
  */
 @Composable
 fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
-    when (state.route) {
-        AppDestination.Chat -> ChatScreen(viewModel)
-        AppDestination.Settings -> SettingsScreen(viewModel)
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    viewModel.refreshWidgetArticle()
+                    viewModel.refreshWidgetStatusPanel()
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        bottomBar = {
+            AppBottomBar(
+                selectedTab = state.selectedTab,
+                articleAvailable = state.widgetArticle != null,
+                onSelectTab = viewModel::selectTab,
+            )
+        },
+    ) { innerPadding ->
+        Box(
+            modifier =
+                Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize(),
+        ) {
+            Crossfade(
+                targetState = state.selectedTab,
+                modifier = Modifier.fillMaxSize(),
+                animationSpec = tween(durationMillis = 200),
+                label = "app_tab_content",
+            ) { tab ->
+                when (tab) {
+                    AppDestination.Article ->
+                        state.widgetArticle?.let { ArticleScreen(it) }
+                            ?: ChatScreen(viewModel)
+                    AppDestination.Chat -> ChatScreen(viewModel)
+                    AppDestination.Mine -> SettingsScreen(viewModel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppBottomBar(
+    selectedTab: AppDestination,
+    articleAvailable: Boolean,
+    onSelectTab: (AppDestination) -> Unit,
+) {
+    NavigationBar {
+        NavigationBarItem(
+            selected = selectedTab == AppDestination.Article,
+            onClick = { onSelectTab(AppDestination.Article) },
+            enabled = articleAvailable,
+            icon = { androidx.compose.material3.Icon(Icons.Outlined.Article, contentDescription = null) },
+            label = { Text("原文") },
+        )
+        NavigationBarItem(
+            selected = selectedTab == AppDestination.Chat,
+            onClick = { onSelectTab(AppDestination.Chat) },
+            icon = { androidx.compose.material3.Icon(Icons.Outlined.Chat, contentDescription = null) },
+            label = { Text("消息") },
+        )
+        NavigationBarItem(
+            selected = selectedTab == AppDestination.Mine,
+            onClick = { onSelectTab(AppDestination.Mine) },
+            icon = { androidx.compose.material3.Icon(Icons.Outlined.Person, contentDescription = null) },
+            label = { Text("我的") },
+        )
     }
 }
 
@@ -59,19 +137,6 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
 @Composable
 private fun ChatScreen(viewModel: AppShellViewModel) {
     val state by viewModel.uiState.collectAsState()
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    // 从后台回到前台时刷新设置页同源数据（Widget 任务列表、定时执行记录）
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshWidgetStatusPanel()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
     val contentInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.ime)
 
     Scaffold(
@@ -86,9 +151,6 @@ private fun ChatScreen(viewModel: AppShellViewModel) {
                         enabled = state.chatMessages.isNotEmpty() || state.agentTraceLines.isNotEmpty(),
                     ) {
                         Text("清空")
-                    }
-                    TextButton(onClick = viewModel::openSettings) {
-                        Text("设置")
                     }
                 },
             )
@@ -130,7 +192,6 @@ private fun ChatInputBar(
         modifier =
             modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
                 .imePadding(),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,

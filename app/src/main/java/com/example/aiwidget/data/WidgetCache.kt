@@ -13,7 +13,12 @@ class WidgetCache(context: Context) {
 
     fun getTitle(slot: String): String? = prefs.getString("${slot}_title", null)
 
-    fun getContent(slot: String): String? = prefs.getString("${slot}_content", null)
+    /** 桌面 Widget 卡片用的摘要（提炼标题列表）。 */
+    fun getSummary(slot: String): String? = prefs.getString("${slot}_summary", null)
+        ?: prefs.getString("${slot}_content", null)
+
+    /** Agent 返回的原文 content（Markdown），供 App 原文 Tab 展示。 */
+    fun getRawContent(slot: String): String? = prefs.getString("${slot}_raw_content", null)
 
     fun getTimeLabel(slot: String): String? = prefs.getString("${slot}_time_label", null)
 
@@ -31,23 +36,29 @@ class WidgetCache(context: Context) {
     fun saveSuccess(
         slot: String,
         title: String,
-        content: String,
+        summary: String,
+        rawContent: String,
         timeLabel: String,
         finishedAtMs: Long = System.currentTimeMillis(),
     ) {
         prefs.edit()
             .putString("${slot}_title", title)
-            .putString("${slot}_content", content)
+            .putString("${slot}_summary", summary)
+            .putString("${slot}_raw_content", rawContent)
             .putString("${slot}_time_label", timeLabel)
             .putLong("${slot}_timestamp", finishedAtMs)
             .putBoolean("${slot}_refreshing", false)
+            .remove("${slot}_content")
             .apply()
     }
 
+    /** 是否有可展示的原文（App 原文 Tab）。 */
+    fun hasRawContent(slot: String): Boolean = !getRawContent(slot).isNullOrBlank()
+
     fun hasCachedContent(slot: String): Boolean {
         val title = getTitle(slot)
-        val content = getContent(slot)
-        return !title.isNullOrBlank() || !content.isNullOrBlank()
+        val summary = getSummary(slot)
+        return !title.isNullOrBlank() || !summary.isNullOrBlank()
     }
 
     companion object {

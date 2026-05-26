@@ -1,6 +1,5 @@
 package com.example.aiwidget.app
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -38,26 +37,17 @@ import com.example.aiwidget.data.Presets
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunOutcome
 
-/** 设置页：后端环境、Widget 定时任务、定时任务执行记录。 */
+/** 我的：后端环境、Widget 定时任务、定时任务执行记录。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: AppShellViewModel) {
     val state by viewModel.uiState.collectAsState()
     val scroll = rememberScrollState()
 
-    BackHandler(onBack = viewModel::closeSettings)
-
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-                navigationIcon = {
-                    TextButton(onClick = viewModel::closeSettings) {
-                        Text("返回")
-                    }
-                },
-            )
+            TopAppBar(title = { Text("我的") })
         },
     ) { innerPadding ->
         Column(

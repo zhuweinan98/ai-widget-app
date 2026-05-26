@@ -11,6 +11,7 @@ import com.example.aiwidget.data.SessionPrefs
 import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunLogStore
+import com.example.aiwidget.data.WidgetCache
 import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.network.AgentRepository
 import com.example.aiwidget.network.ApiException
@@ -23,22 +24,28 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
- * App 内界面导航目的地：对话页 / 设置页。
- * 不含业务逻辑，仅作 [AppShellUiState.route] 的枚举值。
+ * 底部 Tab 目的地：原文 / 消息 / 我的。
  */
 enum class AppDestination {
-    /** Agent 对话（发 prompt、看 SSE trace）。 */
+    /** Widget 速报原文（Markdown）。 */
+    Article,
+
+    /** Agent 对话。 */
     Chat,
 
-    /** API 环境、Widget 定时任务、定时执行记录。 */
-    Settings,
+    /** 设置（环境、Widget 任务等）。 */
+    Mine,
 }
 
+/** 原文 Tab 展示的数据，来自 [com.example.aiwidget.data.WidgetCache]。 */
+data class WidgetArticleSnapshot(
+    val title: String,
+    val timeLabel: String,
+    val rawContent: String,
+)
+
 /**
- * App 内界面（对话 + 设置）的全部状态。
- *
- * 对话相关字段只在 [AppDestination.Chat] 使用；
- * 桌面 Widget 任务编辑字段主要在 [AppDestination.Settings] 使用。
+ * App 内界面（原文 + 对话 + 设置）的全部状态。
  */
 data class AppShellUiState(
     /** 后端 baseUrl，与 [AppPrefs] 同步。 */
@@ -66,7 +73,9 @@ data class AppShellUiState(
     val widgetTaskEditorRows: List<WidgetTaskEditorRow> = emptyList(),
     /** Widget 定时任务执行历史（仅 periodic），供设置页展示。 */
     val widgetPeriodicRunLogs: List<WidgetRunLogEntry> = emptyList(),
-    val route: AppDestination = AppDestination.Chat,
+    /** 原文 Tab 展示内容；null 表示无缓存，Tab 会回落到消息。 */
+    val widgetArticle: WidgetArticleSnapshot? = null,
+    val selectedTab: AppDestination = AppDestination.Chat,
 )
 
 /**
@@ -110,22 +119,46 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             widgetPeriodicRunLogs = loadWidgetPeriodicRunLogs(),
         )
 
-    /** 进入设置页；刷新 Widget 任务与定时执行记录。 */
-    fun openSettings() {
-        refreshWidgetStatusPanel()
-        _uiState.update { it.copy(route = AppDestination.Settings) }
+    /** 处理启动：Launcher 默认消息；Widget 有缓存进原文，否则进消息。 */
+    fun onLaunch(fromWidget: Boolean) {
+        refreshWidgetArticle()
+        val article = _uiState.value.widgetArticle
+        val tab =
+            when {
+                fromWidget && article != null -> AppDestination.Article
+                else -> AppDestination.Chat
+            }
+        selectTab(tab)
     }
 
-    /** 返回对话页；持久化环境配置，并丢弃未保存的任务编辑错误提示。 */
-    fun closeSettings() {
-        saveSessionSettings()
-        _uiState.update {
-            it.copy(
-                route = AppDestination.Chat,
-                widgetTaskEditorRows = loadWidgetTaskEditorRows(),
-                widgetTaskSaveError = null,
-            )
+    /** 切换底部 Tab；原文无缓存时自动落到消息。 */
+    fun selectTab(tab: AppDestination) {
+        if (tab == AppDestination.Article && _uiState.value.widgetArticle == null) {
+            _uiState.update { it.copy(selectedTab = AppDestination.Chat) }
+            return
         }
+        if (tab == AppDestination.Mine) {
+            refreshWidgetStatusPanel()
+        }
+        _uiState.update { it.copy(selectedTab = tab, widgetTaskSaveError = null) }
+    }
+
+    /** 从 [WidgetCache] 重载原文 Tab 数据。 */
+    fun refreshWidgetArticle() {
+        _uiState.update { it.copy(widgetArticle = loadWidgetArticle()) }
+    }
+
+    private fun loadWidgetArticle(): WidgetArticleSnapshot? {
+        val task = WidgetTaskStore(getApplication()).primaryDisplayTask() ?: return null
+        val cache = WidgetCache(getApplication())
+        val slot = task.cacheSlot
+        val raw =
+            cache.getRawContent(slot)?.trim().orEmpty()
+                .ifBlank { cache.getSummary(slot)?.trim().orEmpty() }
+        if (raw.isEmpty()) return null
+        val title = cache.getTitle(slot)?.trim().orEmpty().ifBlank { task.title }
+        val timeLabel = cache.getTimeLabel(slot)?.trim().orEmpty().ifBlank { "--:--" }
+        return WidgetArticleSnapshot(title = title, timeLabel = timeLabel, rawContent = raw)
     }
 
     /** 从磁盘重载 Widget 任务列表与定时执行记录。 */

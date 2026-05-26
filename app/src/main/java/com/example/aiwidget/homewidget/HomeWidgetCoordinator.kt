@@ -199,7 +199,7 @@ object HomeWidgetCoordinator {
         if (cache.hasCachedContent(slot)) {
             val title = HomeWidgetDisplayFormatter.formatTitle(cache.getTitle(slot) ?: "", task.title)
             val summary =
-                HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getContent(slot) ?: "")
+                HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getSummary(slot) ?: "")
             val time = cache.getTimeLabel(slot) ?: "--:--"
             updateAllWidgetInstances(context, title, summary, time, showLoading = false)
         } else {
@@ -240,7 +240,11 @@ object HomeWidgetCoordinator {
             if (showLoading) View.INVISIBLE else View.VISIBLE,
         )
 
-        val openIntent = Intent(context, MainActivity::class.java)
+        val openIntent =
+            Intent(context, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_FROM_WIDGET, true)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
         val openPending =
             PendingIntent.getActivity(
                 context,
