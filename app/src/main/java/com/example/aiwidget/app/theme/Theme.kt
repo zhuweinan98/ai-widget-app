@@ -1,6 +1,6 @@
-package com.example.aiwidget.ui.theme
+package com.example.aiwidget.app.theme
 
-/** Material3 主题包装；业务 UI 在 [com.example.aiwidget.ui.TestScreen] 使用。 */
+/** Material3 主题包装；App 内 Compose 界面在 [com.example.aiwidget.app.AppShellScreen] 使用。 */
 
 import android.app.Activity
 import android.os.Build

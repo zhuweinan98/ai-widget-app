@@ -1,0 +1,191 @@
+package com.example.aiwidget.app
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.aiwidget.data.Presets
+
+/**
+ * App 内界面导航外壳：按 [AppShellUiState.route] 在对话页与设置页之间切换。
+ *
+ * 桌面小组件 UI 在 `homewidget/` + `res/layout/widget_layout.xml`，不在此包。
+ */
+@Composable
+fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
+    val state by viewModel.uiState.collectAsState()
+    when (state.route) {
+        AppDestination.Chat -> ChatScreen(viewModel)
+        AppDestination.Settings -> SettingsScreen(viewModel)
+    }
+}
+
+/** Agent 对话：消息列表 + trace 条 + 底部输入区。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatScreen(viewModel: AppShellViewModel) {
+    val state by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 从后台回到前台时刷新设置页同源数据（Widget 任务列表、定时执行记录）
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshWidgetStatusPanel()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val contentInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.ime)
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = contentInsets,
+        topBar = {
+            TopAppBar(
+                title = { Text("Agent 对话") },
+                actions = {
+                    TextButton(
+                        onClick = viewModel::clearChat,
+                        enabled = state.chatMessages.isNotEmpty() || state.agentTraceLines.isNotEmpty(),
+                    ) {
+                        Text("清空")
+                    }
+                    TextButton(onClick = viewModel::openSettings) {
+                        Text("设置")
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            modifier =
+                Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize(),
+        ) {
+            ChatMessageList(
+                messages = state.chatMessages,
+                expandedMessageIds = state.expandedChatMessageIds,
+                onToggleExpand = viewModel::toggleChatMessageExpanded,
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clipToBounds(),
+            )
+            ChatInputBar(
+                state = state,
+                viewModel = viewModel,
+            )
+        }
+    }
+}
+
+/** 底部：SSE trace、快捷芯片、输入框与发送按钮。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChatInputBar(
+    state: AppShellUiState,
+    viewModel: AppShellViewModel,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TracePanel(traces = state.agentTraceLines, isSending = state.isSending)
+            FlowRow(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Presets.chatPresets.forEach { preset ->
+                    FilterChip(
+                        selected = false,
+                        onClick = { viewModel.sendChatPreset(preset.message, preset.label) },
+                        label = { Text(preset.label) },
+                        enabled = !state.isSending,
+                    )
+                }
+            }
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Checkbox(checked = state.useStream, onCheckedChange = viewModel::updateUseStream)
+                Text("SSE", style = MaterialTheme.typography.labelMedium)
+                OutlinedTextField(
+                    value = state.message,
+                    onValueChange = viewModel::updateMessage,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .heightIn(min = 40.dp, max = 96.dp),
+                    placeholder = { Text("输入 prompt…") },
+                    minLines = 1,
+                    maxLines = 3,
+                    enabled = !state.isSending,
+                )
+                Button(
+                    onClick = {
+                        viewModel.persistSessionSettings()
+                        viewModel.sendChatMessage()
+                    },
+                    enabled = !state.isSending,
+                ) {
+                    Text(if (state.isSending) "…" else "发送")
+                }
+            }
+        }
+    }
+}

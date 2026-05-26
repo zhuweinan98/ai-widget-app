@@ -4,22 +4,25 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.example.aiwidget.ui.TestScreen
-import com.example.aiwidget.ui.theme.AIWidgetTheme
+import com.example.aiwidget.data.AppPrefs
+import com.example.aiwidget.app.AppShellScreen
+import com.example.aiwidget.app.theme.AIWidgetTheme
+import com.example.aiwidget.homewidget.HomeWidgetCoordinator
 
 /**
- * 应用唯一 Activity 入口。
+ * 应用唯一 Activity：挂载 [com.example.aiwidget.app.AppShellScreen]。
  *
- * 当前挂载 [com.example.aiwidget.ui.TestScreen]（后端联调测试页）。
- * 完整产品形态见 ARCHITECTURE.md：对话页 + 桌面 Widget + WorkManager。
+ * 启动时尝试登记 Widget 定时（无 Widget 实例时 [HomeWidgetCoordinator] 内部会跳过）。
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppPrefs(this).getOrCreateUserId()
+        HomeWidgetCoordinator.scheduleEnabledWidgetTasks(this)
         enableEdgeToEdge()
         setContent {
             AIWidgetTheme {
-                TestScreen()
+                AppShellScreen()
             }
         }
     }

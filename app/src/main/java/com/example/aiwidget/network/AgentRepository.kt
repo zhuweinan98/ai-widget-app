@@ -5,6 +5,8 @@ import com.example.aiwidget.data.SkillMetadata
 import com.example.aiwidget.data.SseErrorData
 import com.example.aiwidget.data.TraceEventData
 import com.example.aiwidget.data.WidgetResult
+import com.example.aiwidget.util.AgentRequestLog
+import com.example.aiwidget.util.WidgetResultLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -24,8 +26,18 @@ class AgentRepository {
         RetrofitClient.createApi(baseUrl, apiKey).getSkills()
 
     /** 一次性 JSON 对话（`POST /api/v1/agent/chat`）。 */
-    suspend fun chat(baseUrl: String, apiKey: String, request: ChatRequest): WidgetResult =
-        RetrofitClient.createApi(baseUrl, apiKey).chat(request)
+    suspend fun chat(
+        baseUrl: String,
+        apiKey: String,
+        request: ChatRequest,
+        /** Logcat 来源标识，如 `chat`、`widget/{taskId}/periodic`。 */
+        source: String = "chat",
+    ): WidgetResult {
+        AgentRequestLog.log(source, baseUrl, request, stream = false)
+        return RetrofitClient.createApi(baseUrl, apiKey).chat(request).also {
+            WidgetResultLog.log("$source/json", it)
+        }
+    }
 
     /**
      * SSE 流式对话（`POST /api/v1/agent/chat/stream`）。
@@ -38,8 +50,10 @@ class AgentRepository {
         apiKey: String,
         request: ChatRequest,
         onTrace: (String) -> Unit,
+        source: String = "chat",
     ): WidgetResult =
         withContext(Dispatchers.IO) {
+            AgentRequestLog.log(source, baseUrl, request, stream = true)
             val bodyJson =
                 RetrofitClient.moshiInstance.adapter(ChatRequest::class.java).toJson(request)
             val url = "${RetrofitClient.normalizeBaseUrl(baseUrl)}api/v1/agent/chat/stream"
@@ -127,6 +141,7 @@ class AgentRepository {
                 }
                 throw ApiException("流结束但未收到 result 事件")
             } catch (e: StreamComplete) {
+                WidgetResultLog.log("$source/stream", e.result)
                 e.result
             } finally {
                 reader.close()

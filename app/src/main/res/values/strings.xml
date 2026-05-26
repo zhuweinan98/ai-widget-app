@@ -1,3 +1,12 @@
 <resources>
     <string name="app_name">AI Widget</string>
+    <string name="widget_description">AI 1h 速报，约每小时更新</string>
+    <string name="widget_refresh_desc">立即刷新</string>
+    <string name="widget_loading">正在拉取资讯…</string>
+    <string name="widget_tap_open">点击打开 App 查看详情</string>
+    <string name="widget_refresh_started">正在刷新…</string>
+    <string name="widget_periodic_started">定时任务已开始</string>
+    <string name="widget_periodic_skipped">定时任务：缓存未过期，已跳过</string>
+    <string name="widget_periodic_scheduled">定时已登记：%1$d 分钟间隔，缓存 %2$d 秒</string>
+    <string name="widget_tasks_scheduled">已为 %1$d 条任务登记定时</string>
 </resources>

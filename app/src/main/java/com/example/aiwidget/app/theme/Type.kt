@@ -1,4 +1,4 @@
-package com.example.aiwidget.ui.theme
+package com.example.aiwidget.app.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
