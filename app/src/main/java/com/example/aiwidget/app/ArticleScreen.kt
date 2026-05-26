@@ -21,7 +21,10 @@ import androidx.compose.ui.unit.dp
 /** Widget 速报原文：标题 + 更新时间 + Markdown 正文。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArticleScreen(article: WidgetArticleSnapshot) {
+fun ArticleScreen(
+    article: WidgetArticleSnapshot,
+    onLinkClick: (String) -> Unit,
+) {
     val scroll = rememberScrollState()
 
     Scaffold(
@@ -53,6 +56,7 @@ fun ArticleScreen(article: WidgetArticleSnapshot) {
             ChatMarkdownText(
                 markdown = article.rawContent,
                 modifier = Modifier.fillMaxWidth(),
+                onLinkClick = onLinkClick,
             )
             Spacer(modifier = Modifier.height(24.dp))
         }

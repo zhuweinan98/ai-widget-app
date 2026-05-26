@@ -102,6 +102,7 @@ fun ChatMessageList(
     messages: List<ChatMessage>,
     expandedMessageIds: Set<String>,
     onToggleExpand: (String) -> Unit,
+    onLinkClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -138,7 +139,7 @@ fun ChatMessageList(
         items(items = messages, key = { it.id }) { msg ->
             when (msg.role) {
                 ChatRole.User -> UserMessageRow(msg, expandedMessageIds.contains(msg.id), onToggleExpand)
-                ChatRole.Agent -> AgentMessageRow(msg)
+                ChatRole.Agent -> AgentMessageRow(msg, onLinkClick)
             }
         }
     }
@@ -318,7 +319,10 @@ private fun UserMessageRow(
 }
 
 @Composable
-private fun AgentMessageRow(message: ChatMessage) {
+private fun AgentMessageRow(
+    message: ChatMessage,
+    onLinkClick: (String) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
@@ -335,14 +339,17 @@ private fun AgentMessageRow(message: ChatMessage) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ChatBubble(background = AgentBubble) {
-                AgentBubbleBody(message)
+                AgentBubbleBody(message, onLinkClick)
             }
         }
     }
 }
 
 @Composable
-private fun AgentBubbleBody(message: ChatMessage) {
+private fun AgentBubbleBody(
+    message: ChatMessage,
+    onLinkClick: (String) -> Unit,
+) {
     val color =
         when (message.kind) {
             ChatKind.Error -> MaterialTheme.colorScheme.error
@@ -354,6 +361,7 @@ private fun AgentBubbleBody(message: ChatMessage) {
                 markdown = message.summary,
                 color = color,
                 textStyle = MaterialTheme.typography.bodyMedium,
+                onLinkClick = onLinkClick,
             )
         else ->
             Text(

@@ -16,6 +16,7 @@ import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.network.AgentRepository
 import com.example.aiwidget.network.ApiException
 import com.example.aiwidget.homewidget.HomeWidgetCoordinator
+import com.example.aiwidget.util.LinkNormalizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +77,8 @@ data class AppShellUiState(
     /** 原文 Tab 展示内容；null 表示无缓存，Tab 会回落到消息。 */
     val widgetArticle: WidgetArticleSnapshot? = null,
     val selectedTab: AppDestination = AppDestination.Chat,
+    /** 非空时在 App 内 WebView 打开该链接。 */
+    val browserUrl: String? = null,
 )
 
 /**
@@ -141,6 +144,17 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             refreshWidgetStatusPanel()
         }
         _uiState.update { it.copy(selectedTab = tab, widgetTaskSaveError = null) }
+    }
+
+    /** 在 App 内 WebView 打开 Markdown / 对话中的链接。 */
+    fun openBrowserLink(rawUrl: String) {
+        val normalized = LinkNormalizer.normalize(rawUrl)
+        if (normalized.isBlank()) return
+        _uiState.update { it.copy(browserUrl = normalized) }
+    }
+
+    fun closeBrowser() {
+        _uiState.update { it.copy(browserUrl = null) }
     }
 
     /** 从 [WidgetCache] 重载原文 Tab 数据。 */

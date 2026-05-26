@@ -4,6 +4,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -69,36 +70,50 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            AppBottomBar(
-                selectedTab = state.selectedTab,
-                articleAvailable = state.widgetArticle != null,
-                onSelectTab = viewModel::selectTab,
-            )
-        },
-    ) { innerPadding ->
-        Box(
-            modifier =
-                Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize(),
-        ) {
-            Crossfade(
-                targetState = state.selectedTab,
-                modifier = Modifier.fillMaxSize(),
-                animationSpec = tween(durationMillis = 200),
-                label = "app_tab_content",
-            ) { tab ->
-                when (tab) {
-                    AppDestination.Article ->
-                        state.widgetArticle?.let { ArticleScreen(it) }
-                            ?: ChatScreen(viewModel)
-                    AppDestination.Chat -> ChatScreen(viewModel)
-                    AppDestination.Mine -> SettingsScreen(viewModel)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            bottomBar = {
+                AppBottomBar(
+                    selectedTab = state.selectedTab,
+                    articleAvailable = state.widgetArticle != null,
+                    onSelectTab = viewModel::selectTab,
+                )
+            },
+        ) { innerPadding ->
+            Box(
+                modifier =
+                    Modifier
+                        .padding(innerPadding)
+                        .fillMaxSize(),
+            ) {
+                Crossfade(
+                    targetState = state.selectedTab,
+                    modifier = Modifier.fillMaxSize(),
+                    animationSpec = tween(durationMillis = 200),
+                    label = "app_tab_content",
+                ) { tab ->
+                    when (tab) {
+                        AppDestination.Article ->
+                            state.widgetArticle?.let {
+                                ArticleScreen(
+                                    article = it,
+                                    onLinkClick = viewModel::openBrowserLink,
+                                )
+                            } ?: ChatScreen(viewModel)
+                        AppDestination.Chat -> ChatScreen(viewModel)
+                        AppDestination.Mine -> SettingsScreen(viewModel)
+                    }
                 }
             }
+        }
+
+        state.browserUrl?.let { url ->
+            InAppBrowserScreen(
+                url = url,
+                onClose = viewModel::closeBrowser,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -166,6 +181,7 @@ private fun ChatScreen(viewModel: AppShellViewModel) {
                 messages = state.chatMessages,
                 expandedMessageIds = state.expandedChatMessageIds,
                 onToggleExpand = viewModel::toggleChatMessageExpanded,
+                onLinkClick = viewModel::openBrowserLink,
                 modifier =
                     Modifier
                         .weight(1f)
