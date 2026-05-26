@@ -115,7 +115,7 @@ private fun SettingsSections(state: AppShellUiState, viewModel: AppShellViewMode
 
     SettingsSection(title = "Widget 定时任务") {
         Text(
-            "共 ${state.widgetTaskEditorRows.size} 条 · 取消启用则不定时 · 每条点保存生效",
+            "共 ${state.widgetTaskEditorRows.size} 条 · 取消启用则不定时且不在 Widget 展示 · 每条点保存生效",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -208,7 +208,8 @@ private fun WidgetTaskEditorRowUi(
         OutlinedTextField(
             value = row.prompt,
             onValueChange = onPromptChange,
-            label = { Text("发给 Agent 的 prompt") },
+            label = { Text("任务内容（自然语言）") },
+            supportingText = { Text("执行时会自动追加 Widget 展示格式要求") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 4,

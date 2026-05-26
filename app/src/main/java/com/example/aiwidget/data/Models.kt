@@ -25,12 +25,6 @@ data class WidgetResult(
     @Json(name = "debug_trace") val debugTrace: List<String> = emptyList(),
 )
 
-/** `GET /api/v1/skills` 列表项（name + description）。 */
-data class SkillMetadata(
-    @Json(name = "name") val name: String,
-    @Json(name = "description") val description: String,
-)
-
 /** SSE `event: trace` 的 data 载荷。 */
 data class TraceEventData(
     @Json(name = "line") val line: String? = null,

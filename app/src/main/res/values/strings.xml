@@ -1,9 +1,13 @@
 <resources>
     <string name="app_name">AI Widget</string>
-    <string name="widget_description">AI 1h 速报，约每小时更新</string>
+    <string name="widget_description">AI 速报 · ◀ ▶ 切换任务</string>
     <string name="widget_refresh_desc">立即刷新</string>
     <string name="widget_loading">正在拉取资讯…</string>
-    <string name="widget_tap_open">点击打开 App 查看详情</string>
+    <string name="widget_swipe_hint">◀ ▶ 切换任务 · 点击正文打开详情</string>
+    <string name="widget_page_prev_desc">上一任务</string>
+    <string name="widget_page_next_desc">下一任务</string>
+    <string name="widget_no_enabled_tasks">暂无已启用的定时任务\n请在 App 设置中启用</string>
+    <string name="widget_waiting_first_refresh">等待首次刷新…</string>
     <string name="widget_refresh_started">正在刷新…</string>
     <string name="widget_periodic_started">定时任务已开始</string>
     <string name="widget_periodic_skipped">定时任务：缓存未过期，已跳过</string>

@@ -1,7 +1,6 @@
 package com.example.aiwidget.network
 
 import com.example.aiwidget.data.ChatRequest
-import com.example.aiwidget.data.SkillMetadata
 import com.example.aiwidget.data.SseErrorData
 import com.example.aiwidget.data.TraceEventData
 import com.example.aiwidget.data.WidgetResult
@@ -21,10 +20,6 @@ import java.io.InputStreamReader
  * ViewModel 只依赖本类，不直接操作 Retrofit/OkHttp。
  */
 class AgentRepository {
-    /** 拉取 Skill 列表。 */
-    suspend fun getSkills(baseUrl: String, apiKey: String): List<SkillMetadata> =
-        RetrofitClient.createApi(baseUrl, apiKey).getSkills()
-
     /** 一次性 JSON 对话（`POST /api/v1/agent/chat`）。 */
     suspend fun chat(
         baseUrl: String,

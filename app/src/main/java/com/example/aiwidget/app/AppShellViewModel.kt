@@ -38,12 +38,17 @@ enum class AppDestination {
     Mine,
 }
 
-/** 原文 Tab 展示的数据，来自 [com.example.aiwidget.data.WidgetCache]。 */
+/** 单条 Widget 任务的原文 Tab 数据，来自 [com.example.aiwidget.data.WidgetCache]。 */
 data class WidgetArticleSnapshot(
+    val taskId: String,
+    /** Tab 标签，一般用任务标题。 */
+    val taskTitle: String,
     val title: String,
     val timeLabel: String,
     val rawContent: String,
-)
+) {
+    val hasContent: Boolean get() = rawContent.isNotBlank()
+}
 
 /**
  * App 内界面（原文 + 对话 + 设置）的全部状态。
@@ -74,8 +79,10 @@ data class AppShellUiState(
     val widgetTaskEditorRows: List<WidgetTaskEditorRow> = emptyList(),
     /** Widget 定时任务执行历史（仅 periodic），供设置页展示。 */
     val widgetPeriodicRunLogs: List<WidgetRunLogEntry> = emptyList(),
-    /** 原文 Tab 展示内容；null 表示无缓存，Tab 会回落到消息。 */
-    val widgetArticle: WidgetArticleSnapshot? = null,
+    /** 各 enabled 任务的原文（有/无缓存均列出，供顶部 Tab 切换）。 */
+    val widgetArticles: List<WidgetArticleSnapshot> = emptyList(),
+    /** 原文 Tab 当前选中的 [WidgetArticleSnapshot.taskId]。 */
+    val selectedWidgetArticleTaskId: String? = null,
     val selectedTab: AppDestination = AppDestination.Chat,
     /** 非空时在 App 内 WebView 打开该链接。 */
     val browserUrl: String? = null,
@@ -122,21 +129,21 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             widgetPeriodicRunLogs = loadWidgetPeriodicRunLogs(),
         )
 
-    /** 处理启动：Launcher 默认消息；Widget 有缓存进原文，否则进消息。 */
-    fun onLaunch(fromWidget: Boolean) {
-        refreshWidgetArticle()
-        val article = _uiState.value.widgetArticle
+    /** 处理启动：Launcher 默认消息；Widget 有缓存进原文并定位到对应任务 Tab。 */
+    fun onLaunch(fromWidget: Boolean, widgetTaskId: String? = null) {
+        refreshWidgetArticles(preferredTaskId = widgetTaskId)
+        val hasReadable = _uiState.value.widgetArticles.any { it.hasContent }
         val tab =
             when {
-                fromWidget && article != null -> AppDestination.Article
+                fromWidget && hasReadable -> AppDestination.Article
                 else -> AppDestination.Chat
             }
         selectTab(tab)
     }
 
-    /** 切换底部 Tab；原文无缓存时自动落到消息。 */
+    /** 切换底部 Tab；原文无任何可读缓存时自动落到消息。 */
     fun selectTab(tab: AppDestination) {
-        if (tab == AppDestination.Article && _uiState.value.widgetArticle == null) {
+        if (tab == AppDestination.Article && !_uiState.value.widgetArticles.any { it.hasContent }) {
             _uiState.update { it.copy(selectedTab = AppDestination.Chat) }
             return
         }
@@ -157,22 +164,55 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(browserUrl = null) }
     }
 
-    /** 从 [WidgetCache] 重载原文 Tab 数据。 */
-    fun refreshWidgetArticle() {
-        _uiState.update { it.copy(widgetArticle = loadWidgetArticle()) }
+    /** 从 [WidgetCache] 重载全部 enabled 任务原文；保留或切换 [selectedWidgetArticleTaskId]。 */
+    fun refreshWidgetArticles(preferredTaskId: String? = null) {
+        _uiState.update { state ->
+            val articles = loadWidgetArticles()
+            val selected =
+                resolveSelectedArticleTaskId(
+                    articles = articles,
+                    preferredTaskId = preferredTaskId ?: state.selectedWidgetArticleTaskId,
+                )
+            state.copy(
+                widgetArticles = articles,
+                selectedWidgetArticleTaskId = selected,
+            )
+        }
     }
 
-    private fun loadWidgetArticle(): WidgetArticleSnapshot? {
-        val task = WidgetTaskStore(getApplication()).primaryDisplayTask() ?: return null
+    fun selectWidgetArticleTask(taskId: String) {
+        _uiState.update { it.copy(selectedWidgetArticleTaskId = taskId) }
+    }
+
+    private fun loadWidgetArticles(): List<WidgetArticleSnapshot> {
+        val store = WidgetTaskStore(getApplication())
         val cache = WidgetCache(getApplication())
-        val slot = task.cacheSlot
-        val raw =
-            cache.getRawContent(slot)?.trim().orEmpty()
-                .ifBlank { cache.getSummary(slot)?.trim().orEmpty() }
-        if (raw.isEmpty()) return null
-        val title = cache.getTitle(slot)?.trim().orEmpty().ifBlank { task.title }
-        val timeLabel = cache.getTimeLabel(slot)?.trim().orEmpty().ifBlank { "--:--" }
-        return WidgetArticleSnapshot(title = title, timeLabel = timeLabel, rawContent = raw)
+        return store.loadEnabledTasks().map { task ->
+            val slot = task.cacheSlot
+            val raw =
+                cache.getRawContent(slot)?.trim().orEmpty()
+                    .ifBlank { cache.getSummary(slot)?.trim().orEmpty() }
+            val title = cache.getTitle(slot)?.trim().orEmpty().ifBlank { task.title }
+            val timeLabel = cache.getTimeLabel(slot)?.trim().orEmpty().ifBlank { "--:--" }
+            WidgetArticleSnapshot(
+                taskId = task.id,
+                taskTitle = task.title,
+                title = title,
+                timeLabel = timeLabel,
+                rawContent = raw,
+            )
+        }
+    }
+
+    private fun resolveSelectedArticleTaskId(
+        articles: List<WidgetArticleSnapshot>,
+        preferredTaskId: String?,
+    ): String? {
+        if (articles.isEmpty()) return null
+        preferredTaskId?.let { id ->
+            if (articles.any { it.taskId == id }) return id
+        }
+        return articles.firstOrNull { it.hasContent }?.taskId ?: articles.first().taskId
     }
 
     /** 从磁盘重载 Widget 任务列表与定时执行记录。 */
@@ -299,7 +339,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         commitWidgetTaskEditorRow(taskId, showToast = true, reschedule = true)
     }
 
-    /** 恢复为内置默认任务列表（一条 1h 速报）。 */
+    /** 恢复为内置默认任务列表（1h 速报 + 持仓盈亏）。 */
     fun resetWidgetTasksToDefaults() {
         val store = WidgetTaskStore(getApplication())
         store.saveTasks(store.defaultTasks())

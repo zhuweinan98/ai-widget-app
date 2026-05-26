@@ -21,9 +21,6 @@ object WidgetConfig {
     fun usesPeriodicChain(intervalMinutes: Long): Boolean =
         intervalMinutes < WORK_MANAGER_MIN_PERIODIC_MINUTES
 
-    /** 默认 Widget prompt；对话页「1h 速报」芯片同文。 */
-    const val REFRESH_MESSAGE = "最近一小时 AI 圈有什么重要新闻？"
-
     const val HEADLINE_MAX_ITEMS = 5
     const val HEADLINE_MAX_CHARS_PER_ITEM = 96
     const val SUMMARY_MAX_CHARS = 220

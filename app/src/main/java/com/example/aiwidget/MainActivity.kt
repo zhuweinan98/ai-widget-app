@@ -19,7 +19,7 @@ import com.example.aiwidget.homewidget.HomeWidgetCoordinator
  * 应用唯一 Activity：挂载 [com.example.aiwidget.app.AppShellScreen]。
  *
  * - Launcher 打开：默认「消息」Tab
- * - 点击桌面 Widget 主体：[EXTRA_FROM_WIDGET] → 有缓存进「原文」，否则进「消息」
+ * - 点击桌面 Widget 主体：[EXTRA_FROM_WIDGET] + [EXTRA_WIDGET_TASK_ID] → 有缓存进「原文」，否则进「消息」
  */
 class MainActivity : ComponentActivity() {
     var widgetOpenHandler: (() -> Unit)? = null
@@ -35,12 +35,15 @@ class MainActivity : ComponentActivity() {
                 val activity = LocalContext.current as MainActivity
 
                 DisposableEffect(viewModel) {
-                    activity.widgetOpenHandler = { viewModel.onLaunch(fromWidget = true) }
+                    activity.widgetOpenHandler = { viewModel.onLaunch(fromWidget = true, widgetTaskId = widgetTaskId()) }
                     onDispose { activity.widgetOpenHandler = null }
                 }
 
                 LaunchedEffect(Unit) {
-                    viewModel.onLaunch(intent.getBooleanExtra(EXTRA_FROM_WIDGET, false))
+                    viewModel.onLaunch(
+                        fromWidget = intent.getBooleanExtra(EXTRA_FROM_WIDGET, false),
+                        widgetTaskId = widgetTaskId(),
+                    )
                 }
 
                 AppShellScreen(viewModel = viewModel)
@@ -56,7 +59,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun widgetTaskId(): String? = intent.getStringExtra(EXTRA_WIDGET_TASK_ID)
+
     companion object {
         const val EXTRA_FROM_WIDGET = "extra_from_widget"
+        const val EXTRA_WIDGET_TASK_ID = "extra_widget_task_id"
     }
 }

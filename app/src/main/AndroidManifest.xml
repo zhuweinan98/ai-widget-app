@@ -46,6 +46,9 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="com.example.aiwidget.action.MANUAL_REFRESH" />
+                <action android:name="com.example.aiwidget.action.OPEN_FROM_WIDGET" />
+                <action android:name="com.example.aiwidget.action.PAGE_PREV" />
+                <action android:name="com.example.aiwidget.action.PAGE_NEXT" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

@@ -9,6 +9,7 @@ import com.example.aiwidget.data.ChatRequest
 import com.example.aiwidget.data.WidgetCache
 import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunLogEntry
+import com.example.aiwidget.data.Presets
 import com.example.aiwidget.data.WidgetRunLogStore
 import com.example.aiwidget.data.WidgetRunOutcome
 import com.example.aiwidget.data.WidgetTask
@@ -35,10 +36,10 @@ class HomeWidgetRefreshWorker(
         val taskId = inputData.getString(HomeWidgetCoordinator.WORK_DATA_TASK_ID)
         val task =
             taskId?.let { taskStore.findTask(it) }
-                ?: taskStore.primaryDisplayTask()
+                ?: taskStore.loadEnabledTasks().firstOrNull()
         if (task == null) {
             AppLog.w(TAG, "无可用任务 task_id=$taskId")
-            HomeWidgetCoordinator.renderErrorPlaceholder(applicationContext)
+            HomeWidgetCoordinator.renderAllWidgets(applicationContext)
             return Result.failure()
         }
 
@@ -99,11 +100,12 @@ class HomeWidgetRefreshWorker(
         return try {
             val trigger =
                 inputData.getString(HomeWidgetCoordinator.WORK_DATA_TRIGGER) ?: HomeWidgetCoordinator.TRIGGER_IMMEDIATE
+            val agentMessage = Presets.buildWidgetTaskPrompt(task.prompt)
             val result =
                 agentRepository.chat(
                     baseUrl = appPrefs.baseUrl,
                     apiKey = appPrefs.apiKey,
-                    request = ChatRequest(userId = userId, message = task.prompt),
+                    request = ChatRequest(userId = userId, message = agentMessage),
                     source = "widget/${task.id}/$trigger",
                 )
             if (isPeriodicTrigger) {
@@ -186,7 +188,8 @@ class HomeWidgetRefreshWorker(
             HomeWidgetCoordinator.renderAllWidgets(applicationContext)
             Result.success()
         } else {
-            HomeWidgetCoordinator.renderErrorPlaceholder(applicationContext, task.title)
+            AppLog.w(TAG, "刷新失败且无缓存 task=${task.id}")
+            HomeWidgetCoordinator.renderAllWidgets(applicationContext)
             Result.retry()
         }
     }

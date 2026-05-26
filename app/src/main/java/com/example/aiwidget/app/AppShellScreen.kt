@@ -62,7 +62,7 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
         val observer =
             LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
-                    viewModel.refreshWidgetArticle()
+                    viewModel.refreshWidgetArticles()
                     viewModel.refreshWidgetStatusPanel()
                 }
             }
@@ -76,7 +76,7 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
             bottomBar = {
                 AppBottomBar(
                     selectedTab = state.selectedTab,
-                    articleAvailable = state.widgetArticle != null,
+                    articleAvailable = state.widgetArticles.any { it.hasContent },
                     onSelectTab = viewModel::selectTab,
                 )
             },
@@ -95,12 +95,16 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
                 ) { tab ->
                     when (tab) {
                         AppDestination.Article ->
-                            state.widgetArticle?.let {
+                            if (state.widgetArticles.isNotEmpty()) {
                                 ArticleScreen(
-                                    article = it,
+                                    articles = state.widgetArticles,
+                                    selectedTaskId = state.selectedWidgetArticleTaskId,
+                                    onSelectTask = viewModel::selectWidgetArticleTask,
                                     onLinkClick = viewModel::openBrowserLink,
                                 )
-                            } ?: ChatScreen(viewModel)
+                            } else {
+                                ChatScreen(viewModel)
+                            }
                         AppDestination.Chat -> ChatScreen(viewModel)
                         AppDestination.Mine -> SettingsScreen(viewModel)
                     }
@@ -222,7 +226,7 @@ private fun ChatInputBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Presets.chatPresets.forEach { preset ->
+                Presets.chatPresets().forEach { preset ->
                     FilterChip(
                         selected = false,
                         onClick = { viewModel.sendChatPreset(preset.message, preset.label) },

@@ -7,7 +7,6 @@
     android:orientation="horizontal"
     android:padding="12dp">
 
-    <!-- RemoteViews 不支持 View，用空 TextView 做左侧色条 -->
     <TextView
         android:id="@+id/widget_accent"
         android:layout_width="4dp"
@@ -43,7 +42,7 @@
                 android:id="@+id/widget_time"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:background="@drawable/widget_time_chip"
                 android:paddingLeft="8dp"
                 android:paddingTop="3dp"
@@ -51,6 +50,36 @@
                 android:paddingBottom="3dp"
                 android:textColor="@color/widget_time_chip_text"
                 android:textSize="10sp" />
+
+            <ImageButton
+                android:id="@+id/widget_page_prev"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/widget_refresh_bg"
+                android:contentDescription="@string/widget_page_prev_desc"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_chevron_left" />
+
+            <TextView
+                android:id="@+id/widget_page_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:textColor="@color/widget_muted"
+                android:textSize="10sp" />
+
+            <ImageButton
+                android:id="@+id/widget_page_next"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/widget_refresh_bg"
+                android:contentDescription="@string/widget_page_next_desc"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_chevron_right" />
 
             <ProgressBar
                 android:id="@+id/widget_loading"
@@ -99,5 +128,16 @@
                 android:textColor="@color/widget_muted"
                 android:textSize="10sp" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/widget_no_enabled_tasks"
+            android:textColor="@color/widget_muted"
+            android:textSize="13sp"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>

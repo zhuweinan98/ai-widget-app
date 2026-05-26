@@ -15,11 +15,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import com.example.aiwidget.MainActivity
 import com.example.aiwidget.R
-import com.example.aiwidget.data.AppPrefs
 import com.example.aiwidget.data.WidgetCache
 import com.example.aiwidget.data.WidgetConfig
+import com.example.aiwidget.data.WidgetDisplayState
 import com.example.aiwidget.data.WidgetTask
 import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.util.AppLog
@@ -28,28 +27,30 @@ import java.util.concurrent.TimeUnit
 /**
  * 桌面小组件的 WorkManager 调度与 RemoteViews 渲染。
  *
- * 不负责调用 Agent API（见 [HomeWidgetRefreshWorker]）；
- * 只负责：登记/取消定时、立即刷新入队、把 [WidgetCache] 内容画到桌面。
+ * 单页 RemoteViews + 上一页/下一页循环切换（兼容 MIUI 等 Launcher）；
+ * ↻ 仅刷新当前页对应任务。
  */
 object HomeWidgetCoordinator {
     private const val TAG = "HomeWidgetCoordinator"
 
-    /** 用户点击 Widget 右上角 ↻ 时发送的 Broadcast action。 */
     const val ACTION_MANUAL_REFRESH = "com.example.aiwidget.action.MANUAL_REFRESH"
+    const val ACTION_OPEN_FROM_WIDGET = "com.example.aiwidget.action.OPEN_FROM_WIDGET"
+    const val ACTION_PAGE_PREV = "com.example.aiwidget.action.PAGE_PREV"
+    const val ACTION_PAGE_NEXT = "com.example.aiwidget.action.PAGE_NEXT"
 
-    /** 手动刷新使用的 OneTimeWork 唯一名（全局一条，避免并发多次刷新）。 */
-    const val WORK_IMMEDIATE = "widget_aihot_immediate"
+    const val EXTRA_APPWIDGET_ID = "app_widget_id"
+
+    fun immediateWorkName(taskId: String): String = "widget_immediate_$taskId"
 
     const val WORK_DATA_TASK_ID = "task_id"
     const val WORK_DATA_TRIGGER = "trigger"
 
-    /** WorkManager 输入：定时触发。 */
     const val TRIGGER_PERIODIC = "periodic"
-
-    /** WorkManager 输入：手动 ↻ 或首添立即刷新。 */
     const val TRIGGER_IMMEDIATE = "immediate"
 
-    /** 取消全部任务的 WorkManager 登记（Widget 从桌面移除时）。 */
+    /** @deprecated 保留旧名，新代码请用 [immediateWorkName]。 */
+    const val WORK_IMMEDIATE = "widget_aihot_immediate"
+
     fun hasAppWidgets(context: Context): Boolean {
         val ids =
             AppWidgetManager.getInstance(context)
@@ -57,10 +58,6 @@ object HomeWidgetCoordinator {
         return ids.isNotEmpty()
     }
 
-    /**
-     * 为 [WidgetTaskStore.loadEnabledTasks] 中每条任务登记 WorkManager。
-     * 无 Widget 实例时不做任何事（避免空跑 Worker）。
-     */
     fun scheduleEnabledWidgetTasks(context: Context, showScheduleToast: Boolean = false) {
         val appContext = context.applicationContext
         if (!hasAppWidgets(appContext)) {
@@ -85,7 +82,6 @@ object HomeWidgetCoordinator {
 
     fun taskChainWorkName(taskId: String): String = "widget_task_chain_$taskId"
 
-    /** 间隔 &lt; 15 分钟时用链式 OneTimeWork；否则用 PeriodicWork。 */
     private fun scheduleTaskPeriodic(context: Context, task: WidgetTask) {
         val wm = WorkManager.getInstance(context)
         val interval = WidgetTaskStore(context).intervalMinutes(task)
@@ -121,13 +117,11 @@ object HomeWidgetCoordinator {
         }
     }
 
-    /** 链式定时：单次 Worker 结束后再次排队下一触发。 */
     fun rescheduleTaskChain(context: Context, task: WidgetTask) {
         if (!WidgetConfig.usesPeriodicChain(WidgetTaskStore(context).intervalMinutes(task))) return
         scheduleTaskPeriodic(context, task)
     }
 
-    /** 取消全部任务的 WorkManager 登记（Widget 从桌面移除时）。 */
     fun cancelAllWidgetTaskSchedules(context: Context) {
         val appContext = context.applicationContext
         cancelLegacyPeriodicWorks(appContext)
@@ -135,8 +129,14 @@ object HomeWidgetCoordinator {
             val wm = WorkManager.getInstance(appContext)
             wm.cancelUniqueWork(taskPeriodicWorkName(task.id))
             wm.cancelUniqueWork(taskChainWorkName(task.id))
+            wm.cancelUniqueWork(immediateWorkName(task.id))
         }
+        wmCancelLegacyImmediate(appContext)
         AppLog.i(TAG, "已取消全部任务定时")
+    }
+
+    private fun wmCancelLegacyImmediate(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(WORK_IMMEDIATE)
     }
 
     private fun cancelLegacyPeriodicWorks(context: Context) {
@@ -145,22 +145,32 @@ object HomeWidgetCoordinator {
         wm.cancelUniqueWork("widget_aihot_periodic_chain")
     }
 
-    /**
-     * 入队一次立即刷新（手动 ↻ 或首添 Widget）。
-     * @param forceRefresh true 时 Worker 忽略缓存 TTL
-     */
-    fun enqueueImmediateRefresh(context: Context, forceRefresh: Boolean) {
+    fun enqueueImmediateRefresh(
+        context: Context,
+        taskId: String?,
+        forceRefresh: Boolean,
+    ) {
         val store = WidgetTaskStore(context)
-        val task = store.primaryDisplayTask() ?: return
+        val task =
+            taskId?.let { store.findTask(it) }
+                ?: store.loadEnabledTasks().firstOrNull()
+                ?: return
+        AppLog.i(TAG, "enqueueImmediateRefresh task=${task.id} force=$forceRefresh")
         val request =
             OneTimeWorkRequestBuilder<HomeWidgetRefreshWorker>()
                 .setInputData(buildWorkerInputData(task.id, forceRefresh = forceRefresh))
                 .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            WORK_IMMEDIATE,
+            immediateWorkName(task.id),
             ExistingWorkPolicy.REPLACE,
             request,
         )
+    }
+
+    fun enqueueInitialRefreshForAllEnabledTasks(context: Context) {
+        WidgetTaskStore(context).loadEnabledTasks().forEach { task ->
+            enqueueImmediateRefresh(context, task.id, forceRefresh = true)
+        }
     }
 
     fun buildWorkerInputData(
@@ -174,128 +184,172 @@ object HomeWidgetCoordinator {
             WORK_DATA_TRIGGER to trigger,
         )
 
-    /**
-     * 根据 [WidgetTaskStore.primaryDisplayTask] 与 [WidgetCache] 刷新所有 Widget 实例。
-     */
     fun renderAllWidgets(context: Context) {
-        val store = WidgetTaskStore(context)
-        val task = store.primaryDisplayTask()
-        if (task == null) {
-            renderErrorPlaceholder(context)
-            return
-        }
-        val cache = WidgetCache(context)
-        val slot = task.cacheSlot
-        if (cache.isRefreshing(slot)) {
-            updateAllWidgetInstances(
-                context,
-                title = task.title,
-                summary = "",
-                timeLabel = "更新中…",
-                showLoading = true,
-            )
-            return
-        }
-        if (cache.hasCachedContent(slot)) {
-            val title = HomeWidgetDisplayFormatter.formatTitle(cache.getTitle(slot) ?: "", task.title)
-            val summary =
-                HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getSummary(slot) ?: "")
-            val time = cache.getTimeLabel(slot) ?: "--:--"
-            updateAllWidgetInstances(context, title, summary, time, showLoading = false)
-        } else {
-            updateAllWidgetInstances(
-                context,
-                title = task.title,
-                summary = "等待首次刷新…",
-                timeLabel = "--:--",
-                showLoading = false,
-            )
-        }
-    }
-
-    /** 绑定单个 appWidgetId 的 RemoteViews（点击打开 App、↻ 手动刷新）。 */
-    fun bindWidgetRemoteViews(
-        context: Context,
-        appWidgetManager: AppWidgetManager,
-        appWidgetId: Int,
-        title: String,
-        summary: String,
-        timeLabel: String,
-        showLoading: Boolean,
-    ) {
-        val views = RemoteViews(context.packageName, R.layout.widget_layout)
-        views.setTextViewText(R.id.widget_title, title)
-        views.setTextViewText(R.id.widget_summary, summary)
-        views.setTextViewText(R.id.widget_time, timeLabel)
-        views.setTextViewText(
-            R.id.widget_hint,
-            if (showLoading) context.getString(R.string.widget_loading) else context.getString(R.string.widget_tap_open),
-        )
-        views.setViewVisibility(
-            R.id.widget_loading,
-            if (showLoading) View.VISIBLE else View.GONE,
-        )
-        views.setViewVisibility(
-            R.id.widget_refresh,
-            if (showLoading) View.INVISIBLE else View.VISIBLE,
-        )
-
-        val openIntent =
-            Intent(context, MainActivity::class.java).apply {
-                putExtra(MainActivity.EXTRA_FROM_WIDGET, true)
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-        val openPending =
-            PendingIntent.getActivity(
-                context,
-                appWidgetId,
-                openIntent,
-                pendingIntentFlags(),
-            )
-        views.setOnClickPendingIntent(R.id.widget_body, openPending)
-
-        val refreshIntent =
-            Intent(context, HomeWidgetProvider::class.java).apply {
-                action = ACTION_MANUAL_REFRESH
-            }
-        val refreshPending =
-            PendingIntent.getBroadcast(
-                context,
-                appWidgetId + 10_000,
-                refreshIntent,
-                pendingIntentFlags(),
-            )
-        views.setOnClickPendingIntent(R.id.widget_refresh, refreshPending)
-
-        appWidgetManager.updateAppWidget(appWidgetId, views)
-    }
-
-    /** 无缓存且请求失败时的占位 UI。 */
-    fun renderErrorPlaceholder(context: Context, title: String = "AI 快讯") {
-        updateAllWidgetInstances(
-            context,
-            title = title,
-            summary = "暂无数据\n请检查网络与 API 地址",
-            timeLabel = "--:--",
-            showLoading = false,
-        )
-    }
-
-    private fun updateAllWidgetInstances(
-        context: Context,
-        title: String,
-        summary: String,
-        timeLabel: String,
-        showLoading: Boolean,
-    ) {
         val manager = AppWidgetManager.getInstance(context)
         val ids =
             manager.getAppWidgetIds(
                 ComponentName(context, HomeWidgetProvider::class.java),
             )
         for (id in ids) {
-            bindWidgetRemoteViews(context, manager, id, title, summary, timeLabel, showLoading)
+            bindWidget(context, manager, id)
         }
+    }
+
+    fun bindWidget(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+    ) {
+        val views = RemoteViews(context.packageName, R.layout.widget_layout)
+        val tasks = WidgetTaskStore(context).loadEnabledTasks()
+        val displayState = WidgetDisplayState(context)
+
+        if (tasks.isEmpty()) {
+            views.setViewVisibility(R.id.widget_body, View.GONE)
+            views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_page_prev, View.GONE)
+            views.setViewVisibility(R.id.widget_page_next, View.GONE)
+            views.setViewVisibility(R.id.widget_page_label, View.GONE)
+            views.setViewVisibility(R.id.widget_refresh, View.GONE)
+            appWidgetManager.updateAppWidget(appWidgetId, views)
+            return
+        }
+
+        views.setViewVisibility(R.id.widget_body, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_empty, View.GONE)
+
+        val pageIndex = displayState.getPageIndex(appWidgetId, tasks.size)
+        val task = tasks[pageIndex]
+        val slot = task.cacheSlot
+        val cache = WidgetCache(context)
+        val refreshing = cache.isRefreshing(slot)
+        val hasContent = cache.hasCachedContent(slot)
+
+        val title = HomeWidgetDisplayFormatter.formatTitle(cache.getTitle(slot) ?: "", task.title)
+        val summary =
+            when {
+                refreshing -> ""
+                hasContent ->
+                    HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getSummary(slot) ?: "")
+                else -> context.getString(R.string.widget_waiting_first_refresh)
+            }
+        val timeLabel =
+            when {
+                refreshing -> context.getString(R.string.widget_loading)
+                hasContent -> cache.getTimeLabel(slot) ?: "--:--"
+                else -> "--:--"
+            }
+        val hint =
+            when {
+                refreshing -> context.getString(R.string.widget_loading)
+                else -> context.getString(R.string.widget_swipe_hint)
+            }
+
+        views.setTextViewText(R.id.widget_title, title)
+        views.setTextViewText(R.id.widget_summary, summary)
+        views.setTextViewText(R.id.widget_time, timeLabel)
+        views.setTextViewText(R.id.widget_hint, hint)
+        val showPager = tasks.size > 1
+        views.setViewVisibility(
+            R.id.widget_page_label,
+            if (showPager) View.VISIBLE else View.GONE,
+        )
+        if (showPager) {
+            views.setTextViewText(R.id.widget_page_label, "${pageIndex + 1}/${tasks.size}")
+        }
+        views.setViewVisibility(
+            R.id.widget_loading,
+            if (refreshing) View.VISIBLE else View.GONE,
+        )
+        views.setViewVisibility(
+            R.id.widget_refresh,
+            if (refreshing) View.INVISIBLE else View.VISIBLE,
+        )
+        views.setViewVisibility(
+            R.id.widget_page_prev,
+            if (showPager) View.VISIBLE else View.GONE,
+        )
+        views.setViewVisibility(
+            R.id.widget_page_next,
+            if (showPager) View.VISIBLE else View.GONE,
+        )
+
+        views.setOnClickPendingIntent(
+            R.id.widget_refresh,
+            broadcastPendingIntent(
+                context,
+                requestCode = appWidgetId * 100 + 1,
+                action = ACTION_MANUAL_REFRESH,
+                appWidgetId = appWidgetId,
+                taskId = task.id,
+            ),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_page_prev,
+            broadcastPendingIntent(
+                context,
+                requestCode = appWidgetId * 100 + 2,
+                action = ACTION_PAGE_PREV,
+                appWidgetId = appWidgetId,
+            ),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_page_next,
+            broadcastPendingIntent(
+                context,
+                requestCode = appWidgetId * 100 + 3,
+                action = ACTION_PAGE_NEXT,
+                appWidgetId = appWidgetId,
+            ),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_body,
+            broadcastPendingIntent(
+                context,
+                requestCode = appWidgetId * 100 + 4,
+                action = ACTION_OPEN_FROM_WIDGET,
+                appWidgetId = appWidgetId,
+                taskId = task.id,
+            ),
+        )
+
+        appWidgetManager.updateAppWidget(appWidgetId, views)
+    }
+
+    fun handlePagePrev(context: Context, appWidgetId: Int) {
+        val tasks = WidgetTaskStore(context).loadEnabledTasks()
+        if (tasks.size <= 1) return
+        WidgetDisplayState(context).pagePrev(appWidgetId, tasks.size)
+        bindWidget(context, AppWidgetManager.getInstance(context), appWidgetId)
+    }
+
+    fun handlePageNext(context: Context, appWidgetId: Int) {
+        val tasks = WidgetTaskStore(context).loadEnabledTasks()
+        if (tasks.size <= 1) return
+        WidgetDisplayState(context).pageNext(appWidgetId, tasks.size)
+        bindWidget(context, AppWidgetManager.getInstance(context), appWidgetId)
+    }
+
+    private fun broadcastPendingIntent(
+        context: Context,
+        requestCode: Int,
+        action: String,
+        appWidgetId: Int,
+        taskId: String? = null,
+    ): PendingIntent {
+        val intent =
+            Intent(context, HomeWidgetProvider::class.java).apply {
+                this.action = action
+                setPackage(context.packageName)
+                putExtra(EXTRA_APPWIDGET_ID, appWidgetId)
+                taskId?.let { putExtra(WORK_DATA_TASK_ID, it) }
+            }
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            pendingIntentFlags(),
+        )
     }
 
     private fun pendingIntentFlags(): Int =

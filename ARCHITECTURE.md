@@ -11,7 +11,7 @@
 2. 调用后端 HTTP API（`user_id` + `message`）
 3. 本地缓存与降级（Widget 阶段，见技术方案 §十）
 
-当前阶段：**Agent 对话页** + **桌面 Widget（aihot 1h 速报）**。
+当前阶段：**Agent 对话页** + **桌面 Widget 多任务速报**。
 
 ---
 
@@ -60,11 +60,11 @@ WidgetCache + HomeWidgetCoordinator.renderAllWidgets
 app/src/main/java/com/example/aiwidget/
 ├── MainActivity.kt
 ├── data/
-│   ├── Models.kt              # ChatRequest、WidgetResult、SkillMetadata
+│   ├── Models.kt              # ChatRequest、WidgetResult、SSE 事件模型
 │   ├── AppPrefs.kt            # API 地址/Key、统一 user_id
 │   ├── SessionPrefs.kt        # SSE 开关（API/userId 代理 AppPrefs）
-│   ├── Presets.kt             # 默认 URL/Key、对话快捷 prompt
-│   ├── WidgetConfig.kt        # Widget 默认 prompt / 常量
+│   ├── Presets.kt             # API 默认 + 全部 Agent 自然语言（芯片/Widget 共用）
+│   ├── WidgetConfig.kt        # Widget 默认任务 / 常量
 │   ├── WidgetTask.kt          # 定时任务模型（含 enabled）
 │   ├── WidgetTaskStore.kt     # 任务列表 JSON 持久化
 │   ├── WidgetCache.kt         # 按 cache_slot 缓存展示内容
@@ -120,17 +120,26 @@ app/src/main/java/com/example/aiwidget/
 - 响应 `WidgetResult`：`title`、`content`、`status`、`debug_trace` 等
 - 对话页与 Widget **共用** `AppPrefs` 的 baseUrl / apiKey / **user_id**（首次启动 UUID，设置页可改）
 
+### Prompt 两条链路
+
+| 场景 | 存什么 | 发给 Agent |
+|------|--------|------------|
+| 对话页 / 快捷芯片 | 不持久化 | [Presets] 用户自然语言，原样发送 |
+| Widget 定时任务 | `WidgetTask.prompt` = [Presets] 同款用户语 | [Presets.buildWidgetTaskPrompt] 追加 JSON 格式 |
+
+客户端只发 `user_id` + `message`；取数与推理由后端 Agent 自行完成。
+
 ---
 
 ## 5. Widget 任务与 enabled
 
 | 项 | 说明 |
 |----|------|
-| 任务模型 | `WidgetTask`：title、prompt、intervalMinutes、cacheTtlSeconds、cacheSlot、**enabled** |
+| 任务模型 | `WidgetTask`：title、prompt（用户自然语言）、intervalMinutes、cacheTtlSeconds、cacheSlot、**enabled** |
 | 设置页 | 每条任务可编辑；**启用** Checkbox 控制是否参与定时 |
 | 定时 | 仅 `enabled=true` 的任务登记 WorkManager（`widget_task_{id}`） |
-| 展示 | 桌面 Widget 展示 **[WidgetTaskStore.primaryDisplayTask]** 的缓存 |
-| 默认 | 一条「AI 1h 速报」，prompt = `WidgetConfig.REFRESH_MESSAGE` |
+| 展示 | 单页 RemoteViews + **◀ ▶** 循环切换（MIUI 兼容）；页数 = enabled 任务数；↻ 只刷当前页 |
+| 默认 | 「AI 1h 速报」+「持仓盈亏」两条 enabled 任务 |
 
 ---
 
