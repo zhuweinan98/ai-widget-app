@@ -1,20 +1,21 @@
 package com.example.aiwidget.util
 
-import com.example.aiwidget.data.WidgetResult
+import com.example.aiwidget.data.ChatResponse
 
-/** 打印 Agent 终局 [WidgetResult] 各字段（与 Moshi 映射一致，不做 UI 拼接推测）。 */
-object WidgetResultLog {
-    private const val TAG = "WidgetResult"
+/** 打印聊天终局 [ChatResponse]（与 Moshi 映射一致）。 */
+object ChatResponseLog {
+    private const val TAG = "ChatResponse"
     private const val PREVIEW_CHARS = 320
 
-    fun log(source: String, result: WidgetResult) {
+    fun log(source: String, result: ChatResponse) {
         val title = result.title
         val content = result.content
         val errorMsg = result.errorMsg
 
         AppLog.i(
             TAG,
-            "[$source] status=${result.status} updated_at=${result.updatedAt.ifBlank { "-" }} " +
+            "[$source] session_id=${result.sessionId} status=${result.status} " +
+                "updated_at=${result.updatedAt.ifBlank { "-" }} " +
                 "can_follow_up=${result.canFollowUp} " +
                 "titleLen=${title.length} contentLen=${content.length} " +
                 "errorLen=${errorMsg.length} traceLines=${result.debugTrace.size}",

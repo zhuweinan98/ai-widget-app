@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,8 +47,12 @@ fun SettingsScreen(viewModel: AppShellViewModel) {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = NestedScaffoldContentInsets,
         topBar = {
-            TopAppBar(title = { Text("我的") })
+            TopAppBar(
+                title = { Text("我的") },
+                windowInsets = WindowInsets(0, 0, 0, 0),
+            )
         },
     ) { innerPadding ->
         Column(

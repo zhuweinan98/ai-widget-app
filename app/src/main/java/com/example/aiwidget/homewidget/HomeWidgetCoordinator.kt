@@ -226,24 +226,21 @@ object HomeWidgetCoordinator {
         val hasContent = cache.hasCachedContent(slot)
 
         val title = HomeWidgetDisplayFormatter.formatTitle(cache.getTitle(slot) ?: "", task.title)
+        // 刷新中保留上一版缓存，仅显示 ProgressBar；无缓存时才展示占位文案。
         val summary =
             when {
-                refreshing -> ""
                 hasContent ->
                     HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getSummary(slot) ?: "")
+                refreshing -> context.getString(R.string.widget_loading)
                 else -> context.getString(R.string.widget_waiting_first_refresh)
             }
         val timeLabel =
             when {
-                refreshing -> context.getString(R.string.widget_loading)
                 hasContent -> cache.getTimeLabel(slot) ?: "--:--"
+                refreshing -> context.getString(R.string.widget_loading)
                 else -> "--:--"
             }
-        val hint =
-            when {
-                refreshing -> context.getString(R.string.widget_loading)
-                else -> context.getString(R.string.widget_swipe_hint)
-            }
+        val hint = context.getString(R.string.widget_swipe_hint)
 
         views.setTextViewText(R.id.widget_title, title)
         views.setTextViewText(R.id.widget_summary, summary)

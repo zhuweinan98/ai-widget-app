@@ -1,17 +1,15 @@
-# ai-widget-app 架构说明
+# ai-widget-app
 
-> 完整平台设计见同目录上级文档：[桌面任务平台-技术方案.md](../桌面任务平台-技术方案.md)（v11.0）  
+Android 客户端：**Agent 对话页** + **桌面 Widget 多任务速报**。手机侧不跑大模型，通过 HTTP 调用 `widget-agent-server`。
+
+> 完整平台设计见上级文档：[桌面任务平台-技术方案.md](../桌面任务平台-技术方案.md)（v11.0）  
 > 后端仓库：`../widget-agent-server`
 
 ## 1. 定位
 
-本 App 是 **AI 桌面任务平台的 Android 客户端**。手机侧 **不跑大模型**，只负责：
-
 1. 展示（对话页 / 桌面 Widget）
-2. 调用后端 HTTP API（`user_id` + `message`）
+2. 调用后端 HTTP API（`user_id` + `message` / `session_id`）
 3. 本地缓存与降级（Widget 阶段，见技术方案 §十）
-
-当前阶段：**Agent 对话页** + **桌面 Widget 多任务速报**。
 
 ---
 
@@ -39,7 +37,7 @@
 
 HomeWidgetProvider / WorkManager
         ↓
-HomeWidgetRefreshWorker → AgentRepository.chat
+HomeWidgetRefreshWorker → AgentRepository.widgetRun
         ↓
 WidgetCache + HomeWidgetCoordinator.renderAllWidgets
 ```
@@ -60,7 +58,8 @@ WidgetCache + HomeWidgetCoordinator.renderAllWidgets
 app/src/main/java/com/example/aiwidget/
 ├── MainActivity.kt
 ├── data/
-│   ├── Models.kt              # ChatRequest、WidgetResult、SSE 事件模型
+│   ├── Models.kt              # ChatTurnRequest、ChatResponse、WidgetRunRequest、WidgetResult
+│   ├── ChatLocalStore.kt      # 聊天 session_id / 会话列表 / 消息本地缓存（SP）
 │   ├── AppPrefs.kt            # API 地址/Key、统一 user_id
 │   ├── SessionPrefs.kt        # SSE 开关（API/userId 代理 AppPrefs）
 │   ├── Presets.kt             # API 默认 + 全部 Agent 自然语言（芯片/Widget 共用）
@@ -98,10 +97,12 @@ app/src/main/java/com/example/aiwidget/
 ```
 用户点「发送」/ 快捷芯片
   → AppShellViewModel.sendChatMessage()
-  → ChatRequest(userId, message)
-  → AgentRepository.chat / chatStream(source="chat")
-  → AppShellUiState.chatMessages + agentTraceLines 更新
+  → ChatTurnRequest(userId, session_id?, message)
+  → AgentRepository.chatTurn / chatStream
+  → 持久化 session_id + ChatLocalStore；UI 更新 chatMessages
 ```
+
+启动时 `GET /chat/sessions` merge 列表；有 currentSessionId 时 `GET .../messages` 与服务端对齐。
 
 ### Widget 刷新
 
@@ -109,25 +110,30 @@ app/src/main/java/com/example/aiwidget/
 定时 / 手动 ↻
   → HomeWidgetRefreshWorker
   → 检查 WidgetCache TTL（force_refresh 可跳过）
-  → AgentRepository.chat(source="widget/{taskId}/{trigger}")
+  → AgentRepository.widgetRun（无 session_id）
   → WidgetCache.saveSuccess → HomeWidgetCoordinator.renderAllWidgets
   → periodic 时 WidgetRunLogStore.append（设置页可查看）
 ```
 
-**约定**（与技术方案 §五、§八 一致）：
+**API 分轨**：
 
-- 请求体仅 `user_id`、`message`
-- 响应 `WidgetResult`：`title`、`content`、`status`、`debug_trace` 等
-- 对话页与 Widget **共用** `AppPrefs` 的 baseUrl / apiKey / **user_id**（首次启动 UUID，设置页可改）
+| 场景 | 接口 |
+|------|------|
+| 聊天 | `POST /api/v1/chat`（+ `session_id` 续聊） |
+| 聊天流式 | `POST /api/v1/chat/stream` |
+| Widget | `POST /api/v1/widget/run` |
+
+- 聊天响应 `ChatResponse` 含 `session_id`；Widget 响应 `WidgetResult` 无会话
+- 对话页与 Widget **共用** `AppPrefs` 的 baseUrl / apiKey / **user_id**
 
 ### Prompt 两条链路
 
 | 场景 | 存什么 | 发给 Agent |
 |------|--------|------------|
 | 对话页 / 快捷芯片 | 不持久化 | [Presets] 用户自然语言，原样发送 |
-| Widget 定时任务 | `WidgetTask.prompt` = [Presets] 同款用户语 | [Presets.buildWidgetTaskPrompt] 追加 JSON 格式 |
+| Widget 定时任务 | `WidgetTask.prompt` = [Presets] 同款用户语 | 仅 `user_id` + `message`（用户意图）；**WidgetResult 格式由后端拼接** |
 
-客户端只发 `user_id` + `message`；取数与推理由后端 Agent 自行完成。
+聊天不传 history 数组。取数、终局格式与推理由后端 Agent 完成。
 
 ---
 
@@ -159,7 +165,7 @@ app/src/main/java/com/example/aiwidget/
 
 1. 启动后端：`cd widget-agent-server && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 2. Run `app`；对话页发 prompt 或点快捷芯片
-3. 设置页配置 Widget 任务；长按桌面添加 **AI 1h 速报** 小组件
+3. 设置页配置 Widget 任务；长按桌面添加 Widget 小组件
 4. Widget 首添立即请求；点 **↻** 强制刷新（忽略缓存 TTL）
 
 ---

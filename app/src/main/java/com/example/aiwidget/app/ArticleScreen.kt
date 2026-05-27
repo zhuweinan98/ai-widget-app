@@ -1,6 +1,7 @@
 package com.example.aiwidget.app
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,9 +40,13 @@ fun ArticleScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        contentWindowInsets = NestedScaffoldContentInsets,
         topBar = {
             Column {
-                TopAppBar(title = { Text("速报") })
+                TopAppBar(
+                    title = { Text("速报") },
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                )
                 if (articles.size > 1) {
                     ScrollableTabRow(
                         selectedTabIndex = selectedIndex,
@@ -69,10 +74,16 @@ fun ArticleScreen(
             modifier =
                 Modifier
                     .padding(innerPadding)
-                    .fillMaxSize()
-                    .verticalScroll(scroll)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .fillMaxSize(),
         ) {
+            Column(
+                modifier =
+                    Modifier
+                        .weight(1f, fill = true)
+                        .fillMaxWidth()
+                        .verticalScroll(scroll)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
             Text(
                 text = article.title,
                 style = MaterialTheme.typography.titleLarge,
@@ -99,6 +110,7 @@ fun ArticleScreen(
                 )
             }
             Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 }

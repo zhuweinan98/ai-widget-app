@@ -4,37 +4,39 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.res.stringResource
+import com.example.aiwidget.R
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -51,7 +53,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aiwidget.data.Presets
 
 /**
- * App 外壳：底部 Tab（原文 / 消息 / 我的）固定，上方内容区平滑切换。
+ * App 外壳：顶部 Tab（原文 / 消息 / 我的），下方为各页内容；输入区贴底 + imePadding。
  */
 @Composable
 fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
@@ -62,6 +64,7 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
         val observer =
             LifecycleEventObserver { _, event ->
                 if (event == Lifecycle.Event.ON_RESUME) {
+                    viewModel.refreshChatFromServer()
                     viewModel.refreshWidgetArticles()
                     viewModel.refreshWidgetStatusPanel()
                 }
@@ -73,8 +76,9 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            bottomBar = {
-                AppBottomBar(
+            contentWindowInsets = AppShellContentWindowInsets(),
+            topBar = {
+                AppTabBar(
                     selectedTab = state.selectedTab,
                     articleAvailable = state.widgetArticles.any { it.hasContent },
                     onSelectTab = viewModel::selectTab,
@@ -123,30 +127,39 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
 }
 
 @Composable
-private fun AppBottomBar(
+private fun AppTabBar(
     selectedTab: AppDestination,
     articleAvailable: Boolean,
     onSelectTab: (AppDestination) -> Unit,
 ) {
-    NavigationBar {
-        NavigationBarItem(
+    val selectedIndex =
+        when (selectedTab) {
+            AppDestination.Article -> 0
+            AppDestination.Chat -> 1
+            AppDestination.Mine -> 2
+        }
+    TabRow(
+        modifier = Modifier.statusBarsPadding(),
+        selectedTabIndex = selectedIndex,
+    ) {
+        Tab(
             selected = selectedTab == AppDestination.Article,
             onClick = { onSelectTab(AppDestination.Article) },
             enabled = articleAvailable,
-            icon = { androidx.compose.material3.Icon(Icons.Outlined.Article, contentDescription = null) },
-            label = { Text("原文") },
+            text = { Text("原文") },
+            icon = { Icon(Icons.Outlined.Article, contentDescription = null) },
         )
-        NavigationBarItem(
+        Tab(
             selected = selectedTab == AppDestination.Chat,
             onClick = { onSelectTab(AppDestination.Chat) },
-            icon = { androidx.compose.material3.Icon(Icons.Outlined.Chat, contentDescription = null) },
-            label = { Text("消息") },
+            text = { Text("消息") },
+            icon = { Icon(Icons.Outlined.Chat, contentDescription = null) },
         )
-        NavigationBarItem(
+        Tab(
             selected = selectedTab == AppDestination.Mine,
             onClick = { onSelectTab(AppDestination.Mine) },
-            icon = { androidx.compose.material3.Icon(Icons.Outlined.Person, contentDescription = null) },
-            label = { Text("我的") },
+            text = { Text("我的") },
+            icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
         )
     }
 }
@@ -156,20 +169,30 @@ private fun AppBottomBar(
 @Composable
 private fun ChatScreen(viewModel: AppShellViewModel) {
     val state by viewModel.uiState.collectAsState()
-    val contentInsets = ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.ime)
+    val canStartNewChat =
+        !state.isSending &&
+            (
+                state.chatMessages.isNotEmpty() ||
+                    state.agentTraceLines.isNotEmpty() ||
+                    state.activeChatSessionId != null
+            )
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        contentWindowInsets = contentInsets,
+        contentWindowInsets = NestedScaffoldContentInsets,
         topBar = {
             TopAppBar(
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 title = { Text("Agent 对话") },
                 actions = {
-                    TextButton(
+                    IconButton(
                         onClick = viewModel::clearChat,
-                        enabled = state.chatMessages.isNotEmpty() || state.agentTraceLines.isNotEmpty(),
+                        enabled = canStartNewChat,
                     ) {
-                        Text("清空")
+                        Icon(
+                            imageVector = Icons.Outlined.Add,
+                            contentDescription = stringResource(R.string.chat_new_conversation),
+                        )
                     }
                 },
             )
@@ -212,6 +235,7 @@ private fun ChatInputBar(
         modifier =
             modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .imePadding(),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,

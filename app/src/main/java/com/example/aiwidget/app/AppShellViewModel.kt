@@ -4,11 +4,15 @@ import android.app.Application
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.aiwidget.R
 import com.example.aiwidget.data.AppPrefs
-import com.example.aiwidget.data.ChatRequest
+import com.example.aiwidget.data.ChatLocalStore
+import com.example.aiwidget.data.ChatResponse
+import com.example.aiwidget.data.ChatSessionSummary
+import com.example.aiwidget.data.ChatTurnRequest
 import com.example.aiwidget.data.Presets
 import com.example.aiwidget.data.SessionPrefs
-import com.example.aiwidget.data.WidgetResult
+import com.example.aiwidget.data.StoredChatMessage
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunLogStore
 import com.example.aiwidget.data.WidgetCache
@@ -86,6 +90,8 @@ data class AppShellUiState(
     val selectedTab: AppDestination = AppDestination.Chat,
     /** 非空时在 App 内 WebView 打开该链接。 */
     val browserUrl: String? = null,
+    /** 当前续聊的 session_id；空表示下一条将开新会话（省 token）。 */
+    val activeChatSessionId: String? = null,
 )
 
 /**
@@ -114,10 +120,16 @@ data class WidgetTaskEditorRow(
 class AppShellViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionPrefs = SessionPrefs(application)
     private val appPrefs = AppPrefs(application)
+    private val chatLocalStore = ChatLocalStore(application)
     private val agentRepository = AgentRepository()
 
     private val _uiState = MutableStateFlow(loadInitialState())
     val uiState: StateFlow<AppShellUiState> = _uiState.asStateFlow()
+
+    init {
+        reloadChatMessagesFromLocal()
+        viewModelScope.launch { syncChatWithServer() }
+    }
 
     private fun loadInitialState(): AppShellUiState =
         AppShellUiState(
@@ -127,6 +139,8 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             useStream = sessionPrefs.useStream,
             widgetTaskEditorRows = loadWidgetTaskEditorRows(),
             widgetPeriodicRunLogs = loadWidgetPeriodicRunLogs(),
+            chatMessages = loadChatMessagesFromLocal(),
+            activeChatSessionId = chatLocalStore.currentSessionId,
         )
 
     /** 处理启动：Launcher 默认消息；Widget 有缓存进原文并定位到对应任务 Tab。 */
@@ -162,6 +176,11 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
 
     fun closeBrowser() {
         _uiState.update { it.copy(browserUrl = null) }
+    }
+
+    /** 拉取服务端会话列表与当前会话消息，与 [ChatLocalStore] merge。 */
+    fun refreshChatFromServer() {
+        viewModelScope.launch { syncChatWithServer() }
     }
 
     /** 从 [WidgetCache] 重载全部 enabled 任务原文；保留或切换 [selectedWidgetArticleTaskId]。 */
@@ -320,14 +339,26 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * 新对话：清空 UI 与 [activeChatSessionId]。
+     * 下次发送不带 session_id，服务端开新 thread，避免上下文 token 累积。
+     */
     fun clearChat() {
+        chatLocalStore.clearCurrentConversation()
         _uiState.update {
             it.copy(
                 chatMessages = emptyList(),
                 expandedChatMessageIds = emptySet(),
                 agentTraceLines = emptyList(),
+                activeChatSessionId = null,
             )
         }
+        val app = getApplication<Application>()
+        Toast.makeText(
+            app,
+            app.getString(R.string.chat_new_conversation_toast),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     /**
@@ -388,13 +419,27 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         _uiState.update {
             it.copy(message = if (overrideMessage == null) "" else it.message)
         }
+        val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
+        val sessionId = chatLocalStore.currentSessionId
         appendUserChatMessage(message, userMessageSummary)
+        if (sessionId != null) {
+            chatLocalStore.appendMessage(
+                StoredChatMessage(
+                    localId = UUID.randomUUID().toString(),
+                    sessionId = sessionId,
+                    role = "user",
+                    content = message,
+                    localOnly = true,
+                ),
+            )
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, agentTraceLines = emptyList()) }
             try {
                 val request =
-                    ChatRequest(
-                        userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() },
+                    ChatTurnRequest(
+                        userId = userId,
+                        sessionId = sessionId,
                         message = message,
                     )
                 val result =
@@ -407,7 +452,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                             onTrace = { line -> appendAgentTraceLine(line) },
                         )
                     } else {
-                        agentRepository.chat(
+                        agentRepository.chatTurn(
                             state.baseUrl,
                             state.apiKey,
                             request,
@@ -421,7 +466,8 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                         _uiState.value.agentTraceLines
                     }
                 setAgentTraceLines(traceLines)
-                appendChat(chatMessageFromWidgetResult(result))
+                persistChatTurn(message, result)
+                appendChat(chatMessageFromChatResponse(result))
             } catch (e: ApiException) {
                 appendAgentErrorMessage(e.message ?: "请求失败")
             } catch (e: Exception) {
@@ -541,5 +587,92 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                 summary = text,
             ),
         )
+    }
+
+    private fun loadChatMessagesFromLocal(): List<ChatMessage> {
+        val sessionId = chatLocalStore.currentSessionId ?: return emptyList()
+        return chatLocalStore.loadMessages(sessionId).map { it.toChatMessage() }
+    }
+
+    private fun reloadChatMessagesFromLocal() {
+        val messages = loadChatMessagesFromLocal()
+        if (messages.isNotEmpty()) {
+            _uiState.update { it.copy(chatMessages = messages) }
+        }
+    }
+
+    private suspend fun syncChatWithServer() {
+        val state = _uiState.value
+        val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
+        try {
+            val sessions =
+                agentRepository.listChatSessions(
+                    baseUrl = state.baseUrl,
+                    apiKey = state.apiKey,
+                    userId = userId,
+                )
+            chatLocalStore.mergeSessionsFromServer(sessions)
+            val sessionId = chatLocalStore.currentSessionId ?: return
+            val remote =
+                agentRepository.listChatMessages(
+                    baseUrl = state.baseUrl,
+                    apiKey = state.apiKey,
+                    sessionId = sessionId,
+                    userId = userId,
+                )
+            chatLocalStore.replaceMessagesFromServer(sessionId, remote)
+            reloadChatMessagesFromLocal()
+        } catch (_: Exception) {
+            // 离线保留本地缓存
+        }
+    }
+
+    private fun persistChatTurn(
+        userMessage: String,
+        response: ChatResponse,
+    ) {
+        val sessionId = response.sessionId.trim()
+        if (sessionId.isEmpty()) return
+
+        chatLocalStore.currentSessionId = sessionId
+        _uiState.update { it.copy(activeChatSessionId = sessionId) }
+        chatLocalStore.upsertSession(
+            ChatSessionSummary(
+                sessionId = sessionId,
+                title = response.title.ifBlank { summarizePrompt(userMessage, 32) },
+                updatedAt = response.updatedAt,
+            ),
+        )
+
+        val messages = chatLocalStore.loadMessages(sessionId).toMutableList()
+        val userIndex =
+            messages.indexOfLast { it.role == "user" && it.content == userMessage }
+        if (userIndex >= 0) {
+            messages[userIndex] = messages[userIndex].copy(localOnly = false)
+        } else {
+            messages.add(
+                StoredChatMessage(
+                    localId = UUID.randomUUID().toString(),
+                    sessionId = sessionId,
+                    role = "user",
+                    content = userMessage,
+                    localOnly = false,
+                ),
+            )
+        }
+        val assistantBody =
+            response.content.trim().ifBlank {
+                response.title.trim().ifBlank { response.errorMsg }
+            }
+        messages.add(
+            StoredChatMessage(
+                localId = UUID.randomUUID().toString(),
+                sessionId = sessionId,
+                role = "assistant",
+                content = assistantBody,
+                localOnly = false,
+            ),
+        )
+        chatLocalStore.saveMessages(sessionId, messages)
     }
 }

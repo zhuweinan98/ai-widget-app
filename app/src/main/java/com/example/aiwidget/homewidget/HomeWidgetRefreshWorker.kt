@@ -5,7 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.aiwidget.R
 import com.example.aiwidget.data.AppPrefs
-import com.example.aiwidget.data.ChatRequest
+import com.example.aiwidget.data.WidgetRunRequest
 import com.example.aiwidget.data.WidgetCache
 import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunLogEntry
@@ -102,10 +102,10 @@ class HomeWidgetRefreshWorker(
                 inputData.getString(HomeWidgetCoordinator.WORK_DATA_TRIGGER) ?: HomeWidgetCoordinator.TRIGGER_IMMEDIATE
             val agentMessage = Presets.buildWidgetTaskPrompt(task.prompt)
             val result =
-                agentRepository.chat(
+                agentRepository.widgetRun(
                     baseUrl = appPrefs.baseUrl,
                     apiKey = appPrefs.apiKey,
-                    request = ChatRequest(userId = userId, message = agentMessage),
+                    request = WidgetRunRequest(userId = userId, message = agentMessage),
                     source = "widget/${task.id}/$trigger",
                 )
             if (isPeriodicTrigger) {

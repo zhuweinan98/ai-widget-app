@@ -11,7 +11,7 @@ data class MessagePreset(
  * 默认 API 配置，以及**全部发给 Agent 的自然语言**（对话芯片与 Widget 定时共用）。
  *
  * - 对话页：芯片直接发 [message]
- * - Widget：`WidgetTask.prompt` 存用户语；发送时用 [buildWidgetTaskPrompt] 追加 [WIDGET_RESPONSE_FORMAT]
+ * - Widget：`WidgetTask.prompt` 存用户语，原样作为 `message` 发给 `/widget/run`（终局格式由后端拼接）
  */
 object Presets {
     /** 本机；真机联调配合 `adb reverse tcp:8000 tcp:8000`。模拟器请改为 `10.0.2.2`。 */
@@ -47,24 +47,11 @@ object Presets {
         【ETF/联接】华夏国证半导体芯片ETF联接C（008888）、招商中证消费电子主题ETF联接C（016008）、南方储能电池ETF联接C（018927）、融通产业趋势臻选股票C（018495）、华宝创业板人工智能ETF联接C（023408）
         """.trimIndent()
 
-    // ── Widget 专用：输出格式后缀（拼在用户语后面）──────────────────────────
-
-    /**
-     * Widget 定时/手动刷新时追加的 JSON/Markdown 格式要求。
-     * 对应响应 [WidgetResult]：`title`、`content`、`status`。
-     */
-    val WIDGET_RESPONSE_FORMAT: String =
-        """
-        请直接回答上述问题。终局有且仅有一行 JSON，字段：title、content（3～8 条要点，Markdown）、status 固定 ok；勿先写长文说明，勿编造。
-        title：供桌面 Widget 首行，≤20 字，写整体结论或主题；若回答含汇总/统计，务必把核心数字写进 title（如涨跌概况、条数）。
-        content：每条要点独立一行；**加粗须含该条最关键信息**（桌面卡片只展示加粗片段，勿把数字或标题写在加粗外）。叙述类要点：**标题** 后接说明，有可靠来源 URL 时同行附 [查看原文](https://...) 或 [媒体名](https://...)，有链接务必保留、无链接勿编造；数据/列表类要点：**标识 简称 +核心指标**（如 **000979 景顺长城 +2.32%**），说明放加粗后。
-        """.trimIndent().replace('\n', ' ')
-
-    /** 用户自然语言 + Widget 输出格式，发给 `POST /agent/chat`。 */
+    /** 整理后作为 `POST /api/v1/widget/run` 的 `message`（仅用户意图；WidgetResult 格式说明在后端）。 */
     fun buildWidgetTaskPrompt(userMessage: String): String {
         val intent = userMessage.trim()
         require(intent.isNotEmpty()) { "Widget task prompt cannot be blank" }
-        return "$intent $WIDGET_RESPONSE_FORMAT"
+        return intent
     }
 
     // ── 对话页快捷芯片 ────────────────────────────────────────────────────

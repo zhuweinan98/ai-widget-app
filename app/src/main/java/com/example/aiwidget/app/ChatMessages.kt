@@ -4,7 +4,7 @@ package com.example.aiwidget.app
  * 对话：消息模型、列表 UI、SSE trace 面板。
  *
  * Agent 回复 Markdown 见 [ChatMarkdownText]；
- * 将 [com.example.aiwidget.data.WidgetResult] 转为气泡见 [chatMessageFromWidgetResult]。
+ * 将 [com.example.aiwidget.data.ChatResponse] 转为气泡见 [chatMessageFromChatResponse]。
  */
 
 import androidx.compose.foundation.background
@@ -52,7 +52,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.aiwidget.data.WidgetResult
+import com.example.aiwidget.data.ChatResponse
+import com.example.aiwidget.data.StoredChatMessage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -211,9 +212,9 @@ fun TracePanel(
                     Icon(
                         imageVector =
                             if (expanded) {
-                                Icons.Filled.KeyboardArrowUp
-                            } else {
                                 Icons.Filled.KeyboardArrowDown
+                            } else {
+                                Icons.Filled.KeyboardArrowUp
                             },
                         contentDescription = if (expanded) "收起 trace" else "展开 trace",
                         modifier = Modifier.size(22.dp),
@@ -253,9 +254,9 @@ fun TracePanel(
     }
 }
 
-    /** 将 [WidgetResult] 转为 Agent 侧聊天气泡（含错误态）。 */
-    fun chatMessageFromWidgetResult(result: WidgetResult): ChatMessage {
-    val fullText = agentMessageText(result)
+/** 将 [ChatResponse] 转为 Agent 侧聊天气泡（含错误态）。 */
+fun chatMessageFromChatResponse(result: ChatResponse): ChatMessage {
+    val fullText = agentTurnDisplayText(result.title, result.content, result.errorMsg)
     val summary =
         if (fullText.length <= 200) {
             fullText
@@ -270,6 +271,32 @@ fun TracePanel(
         fullText = fullText,
     )
 }
+
+/** 本地缓存消息 → 对话 UI。 */
+fun StoredChatMessage.toChatMessage(): ChatMessage =
+    when (role.lowercase()) {
+        "user" ->
+            ChatMessage(
+                id = localId,
+                role = ChatRole.User,
+                kind = ChatKind.UserPrompt,
+                summary = summarizePrompt(content),
+                fullText = content,
+            )
+        else ->
+            ChatMessage(
+                id = localId,
+                role = ChatRole.Agent,
+                kind = ChatKind.Result,
+                summary =
+                    if (content.length <= 200) {
+                        content
+                    } else {
+                        content.take(200) + "…"
+                    },
+                fullText = content,
+            )
+    }
 
 @Composable
 private fun UserMessageRow(
@@ -419,16 +446,16 @@ private fun formatChatTime(ms: Long): String {
     return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
 }
 
-private fun agentMessageText(result: WidgetResult): String {
-    val title = result.title.trim()
-    val content = result.content.trim()
-    val error = result.errorMsg.trim()
+private fun agentTurnDisplayText(title: String, content: String, errorMsg: String): String {
+    val t = title.trim()
+    val c = content.trim()
+    val error = errorMsg.trim()
     return when {
-        content.isNotBlank() && title.isNotBlank() -> "$title\n\n$content"
-        content.isNotBlank() -> content
-        error.isNotBlank() && title.isNotBlank() -> "$title\n\n$error"
+        c.isNotBlank() && t.isNotBlank() -> "$t\n\n$c"
+        c.isNotBlank() -> c
+        error.isNotBlank() && t.isNotBlank() -> "$t\n\n$error"
         error.isNotBlank() -> error
-        title.isNotBlank() -> title
+        t.isNotBlank() -> t
         else -> "(无正文)"
     }
 }

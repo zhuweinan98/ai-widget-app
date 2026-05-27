@@ -3,9 +3,9 @@ package com.example.aiwidget.app
 import android.text.Spannable
 import android.text.Spanned
 import android.text.TextPaint
-import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
 import android.text.style.URLSpan
+import android.text.method.LinkMovementMethod
 import android.view.MotionEvent
 import android.view.View
 import android.widget.TextView
@@ -30,7 +30,7 @@ import io.noties.markwon.linkify.LinkifyPlugin
  * 将 Markdown 渲染为可点击链接的文本。
  *
  * - `[查看原文](url)` 与纯文本 URL 均可点击
- * - 默认关闭文本选择，避免与链接点击冲突（在 [verticalScroll] 里尤其明显）
+ * - 默认关闭文本选择；仅在按下链接时拦截父级滚动，避免整页无法上下滑动
  */
 @Composable
 fun ChatMarkdownText(
@@ -79,7 +79,7 @@ fun ChatMarkdownText(
                 linksClickable = true
                 setTextIsSelectable(false)
                 setLinkTextColor(linkColor)
-                setOnTouchListener(linkTouchListener)
+                setOnTouchListener(markdownLinkTouchListener)
             }
         },
         update = { textView ->
@@ -91,14 +91,40 @@ fun ChatMarkdownText(
     )
 }
 
-/** 滚动容器内点击链接时，避免父级抢走手势。 */
-private val linkTouchListener =
+/**
+ * 仅在触摸落在链接上时禁止父级 [androidx.compose.foundation.verticalScroll] 拦截，
+ * 否则原文页/长文 Markdown 区域无法上下滑动。
+ */
+private val markdownLinkTouchListener =
     View.OnTouchListener { view, event ->
-        if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_DOWN) {
-            view.parent?.requestDisallowInterceptTouchEvent(true)
+        val textView = view as? TextView ?: return@OnTouchListener false
+        val text = textView.text as? Spannable
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val onLink = text != null && isTouchOnClickableLink(textView, text, event)
+                textView.parent?.requestDisallowInterceptTouchEvent(onLink)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                textView.parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
         false
     }
+
+private fun isTouchOnClickableLink(
+    textView: TextView,
+    text: Spannable,
+    event: MotionEvent,
+): Boolean {
+    val offset =
+        try {
+            textView.getOffsetForPosition(event.x, event.y)
+        } catch (_: Exception) {
+            -1
+        }
+    if (offset < 0) return false
+    return text.getSpans(offset, offset, ClickableSpan::class.java).isNotEmpty()
+}
 
 private fun applyMarkdownWithLinkClicks(
     textView: TextView,
