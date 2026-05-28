@@ -47,13 +47,6 @@ object Presets {
         【ETF/联接】华夏国证半导体芯片ETF联接C（008888）、招商中证消费电子主题ETF联接C（016008）、南方储能电池ETF联接C（018927）、融通产业趋势臻选股票C（018495）、华宝创业板人工智能ETF联接C（023408）
         """.trimIndent()
 
-    /** 整理后作为 `POST /api/v1/widget/run` 的 `message`（仅用户意图；WidgetResult 格式说明在后端）。 */
-    fun buildWidgetTaskPrompt(userMessage: String): String {
-        val intent = userMessage.trim()
-        require(intent.isNotEmpty()) { "Widget task prompt cannot be blank" }
-        return intent
-    }
-
     // ── 对话页快捷芯片 ────────────────────────────────────────────────────
 
     fun chatPresets(): List<MessagePreset> =

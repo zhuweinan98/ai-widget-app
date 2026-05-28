@@ -7,9 +7,9 @@ import com.example.aiwidget.R
 import com.example.aiwidget.data.AppPrefs
 import com.example.aiwidget.data.WidgetRunRequest
 import com.example.aiwidget.data.WidgetCache
+import com.example.aiwidget.data.validateForWidget
 import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunLogEntry
-import com.example.aiwidget.data.Presets
 import com.example.aiwidget.data.WidgetRunLogStore
 import com.example.aiwidget.data.WidgetRunOutcome
 import com.example.aiwidget.data.WidgetTask
@@ -100,7 +100,11 @@ class HomeWidgetRefreshWorker(
         return try {
             val trigger =
                 inputData.getString(HomeWidgetCoordinator.WORK_DATA_TRIGGER) ?: HomeWidgetCoordinator.TRIGGER_IMMEDIATE
-            val agentMessage = Presets.buildWidgetTaskPrompt(task.prompt)
+            val agentMessage = task.prompt.trim()
+            if (agentMessage.isEmpty()) {
+                AppLog.w(TAG, "任务 prompt 为空 task=${task.id}")
+                return handleRefreshFailure(widgetCache, task)
+            }
             val result =
                 agentRepository.widgetRun(
                     baseUrl = appPrefs.baseUrl,
@@ -124,19 +128,45 @@ class HomeWidgetRefreshWorker(
                 )
             }
             if (result.status == "ok") {
+                val validationError = result.validateForWidget()
+                if (validationError != null) {
+                    AppLog.w(TAG, "Widget 终局无效 task=${task.id}: $validationError")
+                    if (isPeriodicTrigger) {
+                        appendPeriodicLog(
+                            task,
+                            outcome = WidgetRunOutcome.API_ERROR,
+                            status = result.status,
+                            errorMsg = validationError,
+                            title = result.title,
+                            result = result,
+                        )
+                    }
+                    handleRefreshFailure(widgetCache, task)
+                    return Result.success()
+                }
                 val finishedAtMs = System.currentTimeMillis()
                 val title = HomeWidgetDisplayFormatter.formatTitle(result.title, task.title)
-                val summary = HomeWidgetDisplayFormatter.formatHeadlinesFromContent(result.content)
                 val timeLabel = HomeWidgetDisplayFormatter.formatRefreshTime(finishedAtMs)
+                val imagePath =
+                    HomeWidgetImageLoader.download(
+                        applicationContext,
+                        cacheSlot,
+                        result.imageUrl,
+                    )
                 AppLog.d(
                     TAG,
-                    "widget展示 task=${task.id} title=$title | summary=${summary.take(120)}",
+                    "widget展示 task=${task.id} template=${result.template} title=$title " +
+                        "items=${result.items.size} headline=${result.headline.take(40)}",
                 )
                 widgetCache.saveSuccess(
                     cacheSlot,
                     title,
-                    summary,
-                    result.content,
+                    result.template.trim(),
+                    result.items,
+                    result.headline,
+                    result.subtitle,
+                    imagePath,
+                    result.content.trim(),
                     timeLabel,
                     finishedAtMs,
                 )

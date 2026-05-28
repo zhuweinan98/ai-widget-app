@@ -25,6 +25,11 @@ data class ChatTurnRequest(
 data class WidgetResult(
     @Json(name = "title") val title: String,
     @Json(name = "content") val content: String,
+    @Json(name = "template") val template: String = "",
+    @Json(name = "headline") val headline: String = "",
+    @Json(name = "subtitle") val subtitle: String = "",
+    @Json(name = "image_url") val imageUrl: String = "",
+    @Json(name = "items") val items: List<WidgetListItem> = emptyList(),
     @Json(name = "status") val status: String = "ok",
     @Json(name = "error_msg") val errorMsg: String = "",
     @Json(name = "can_follow_up") val canFollowUp: Boolean = true,

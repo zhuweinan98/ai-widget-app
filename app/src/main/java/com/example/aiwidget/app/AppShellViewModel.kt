@@ -238,9 +238,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         val cache = WidgetCache(getApplication())
         return store.loadEnabledTasks().map { task ->
             val slot = task.cacheSlot
-            val raw =
-                cache.getRawContent(slot)?.trim().orEmpty()
-                    .ifBlank { cache.getSummary(slot)?.trim().orEmpty() }
+            val raw = cache.getRawContent(slot)?.trim().orEmpty()
             val title = cache.getTitle(slot)?.trim().orEmpty().ifBlank { task.title }
             val timeLabel = cache.getTimeLabel(slot)?.trim().orEmpty().ifBlank { "--:--" }
             WidgetArticleSnapshot(

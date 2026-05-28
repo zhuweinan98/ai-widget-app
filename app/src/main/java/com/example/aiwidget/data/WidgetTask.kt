@@ -16,31 +16,8 @@ data class WidgetTask(
     val enabled: Boolean = true,
     val intervalMinutes: Long = WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES,
     val cacheTtlSeconds: Int = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
-)
-
-/** 兼容旧 JSON 字段 `label` / `message`。 */
-internal data class WidgetTaskDto(
-    val id: String,
-    val title: String? = null,
-    val label: String? = null,
-    val prompt: String? = null,
-    val message: String? = null,
-    val cacheSlot: String = "",
-    val enabled: Boolean = true,
-    val intervalMinutes: Long = WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES,
-    val cacheTtlSeconds: Int = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
 ) {
-    fun toTask(): WidgetTask {
-        val resolvedTitle = title?.trim().orEmpty().ifBlank { label?.trim().orEmpty() }.ifBlank { id }
-        val resolvedPrompt = prompt?.trim().orEmpty().ifBlank { message?.trim().orEmpty() }
-        return WidgetTask(
-            id = id,
-            title = resolvedTitle,
-            prompt = resolvedPrompt,
-            cacheSlot = cacheSlot.ifBlank { id },
-            enabled = enabled,
-            intervalMinutes = intervalMinutes,
-            cacheTtlSeconds = cacheTtlSeconds,
-        )
+    companion object {
+        const val HOLDINGS_TASK_ID = "widget_holdings"
     }
 }

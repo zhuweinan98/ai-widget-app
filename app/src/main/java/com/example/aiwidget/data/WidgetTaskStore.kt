@@ -18,11 +18,6 @@ class WidgetTaskStore(context: Context) {
             Types.newParameterizedType(List::class.java, WidgetTask::class.java),
         )
 
-    private val tasksDtoAdapter =
-        RetrofitClient.moshiInstance.adapter<List<WidgetTaskDto>>(
-            Types.newParameterizedType(List::class.java, WidgetTaskDto::class.java),
-        )
-
     init {
         seedDefaultsIfEmpty()
     }
@@ -44,7 +39,7 @@ class WidgetTaskStore(context: Context) {
                 cacheTtlSeconds = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
             ),
             WidgetTask(
-                id = "widget_holdings",
+                id = WidgetTask.HOLDINGS_TASK_ID,
                 title = "持仓盈亏",
                 prompt = Presets.holdingsUserMessage(),
                 cacheSlot = "holdings",
@@ -55,52 +50,15 @@ class WidgetTaskStore(context: Context) {
 
     fun loadTasks(): List<WidgetTask> {
         val raw = prefs.getString(KEY_TASKS_JSON, null) ?: return defaultTasks()
-        val parsed =
-            try {
-                tasksAdapter.fromJson(raw)
-                    ?.filter { it.id.isNotBlank() }
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: parseTasksLegacy(raw)
-            } catch (_: Exception) {
-                parseTasksLegacy(raw)
-            }
-        return migrateLegacyTasks(parsed)
-    }
-
-    /** 旧版「aihot_1h + aihot_24h」双任务；升级后合并为单条 widget_main（保留用户配置）。 */
-    private fun migrateLegacyTasks(tasks: List<WidgetTask>): List<WidgetTask> {
-        if (!tasks.any { it.id == LEGACY_TASK_24H_ID }) {
-            return tasks
-        }
-        val primary =
-            tasks.find { it.id == LEGACY_TASK_1H_ID || it.id == "widget_main" }
-                ?: tasks.first()
-        val migrated =
-            listOf(
-                WidgetTask(
-                    id = "widget_main",
-                    title = primary.title.ifBlank { "AI 1h 速报" },
-                    prompt = primary.prompt.ifBlank { Presets.AI_1H_USER_MESSAGE },
-                    cacheSlot = WidgetConfig.CACHE_SLOT,
-                    intervalMinutes = primary.intervalMinutes,
-                    cacheTtlSeconds = primary.cacheTtlSeconds,
-                    enabled = primary.enabled,
-                ),
-            )
-        saveTasks(migrated)
-        return migrated
-    }
-
-    private fun parseTasksLegacy(raw: String): List<WidgetTask> =
-        try {
-            tasksDtoAdapter.fromJson(raw)
-                ?.map { it.toTask() }
+        return try {
+            tasksAdapter.fromJson(raw)
                 ?.filter { it.id.isNotBlank() }
                 ?.takeIf { it.isNotEmpty() }
                 ?: defaultTasks()
         } catch (_: Exception) {
             defaultTasks()
         }
+    }
 
     fun saveTasks(tasks: List<WidgetTask>) {
         if (tasks.isEmpty()) return
@@ -127,7 +85,5 @@ class WidgetTaskStore(context: Context) {
 
     companion object {
         private const val KEY_TASKS_JSON = "widget_tasks_json"
-        private const val LEGACY_TASK_1H_ID = "aihot_1h"
-        private const val LEGACY_TASK_24H_ID = "aihot_24h"
     }
 }

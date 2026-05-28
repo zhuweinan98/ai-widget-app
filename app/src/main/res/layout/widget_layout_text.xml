@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/widget_accent"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:layout_marginEnd="10dp"
+        android:background="@drawable/widget_accent_bar"
+        android:text="" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/widget_title"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/widget_time_chip"
+                android:paddingLeft="8dp"
+                android:paddingTop="3dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="3dp"
+                android:textColor="@color/widget_time_chip_text"
+                android:textSize="10sp" />
+
+            <ImageButton
+                android:id="@+id/widget_page_prev"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/widget_refresh_bg"
+                android:contentDescription="@string/widget_page_prev_desc"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_chevron_left" />
+
+            <TextView
+                android:id="@+id/widget_page_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="2dp"
+                android:textColor="@color/widget_muted"
+                android:textSize="10sp" />
+
+            <ImageButton
+                android:id="@+id/widget_page_next"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/widget_refresh_bg"
+                android:contentDescription="@string/widget_page_next_desc"
+                android:padding="6dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_chevron_right" />
+
+            <ProgressBar
+                android:id="@+id/widget_loading"
+                style="?android:attr/progressBarStyleSmall"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="4dp"
+                android:indeterminate="true"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/widget_refresh"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/widget_refresh_bg"
+                android:contentDescription="@string/widget_refresh_desc"
+                android:padding="8dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_refresh" />
+        </LinearLayout>
+
+                <LinearLayout
+            android:id="@+id/widget_body"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_summary"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:gravity="top"
+                android:lineSpacingExtra="3dp"
+                android:maxLines="5"
+                android:textColor="@color/widget_body"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/widget_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/widget_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/widget_no_enabled_tasks"
+            android:textColor="@color/widget_muted"
+            android:textSize="13sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

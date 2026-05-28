@@ -48,9 +48,6 @@ object HomeWidgetCoordinator {
     const val TRIGGER_PERIODIC = "periodic"
     const val TRIGGER_IMMEDIATE = "immediate"
 
-    /** @deprecated 保留旧名，新代码请用 [immediateWorkName]。 */
-    const val WORK_IMMEDIATE = "widget_aihot_immediate"
-
     fun hasAppWidgets(context: Context): Boolean {
         val ids =
             AppWidgetManager.getInstance(context)
@@ -64,7 +61,6 @@ object HomeWidgetCoordinator {
             AppLog.d(TAG, "无 Widget 实例，跳过定时登记")
             return
         }
-        cancelLegacyPeriodicWorks(appContext)
         val store = WidgetTaskStore(appContext)
         val enabledTasks = store.loadEnabledTasks()
         enabledTasks.forEach { scheduleTaskPeriodic(appContext, it) }
@@ -124,25 +120,13 @@ object HomeWidgetCoordinator {
 
     fun cancelAllWidgetTaskSchedules(context: Context) {
         val appContext = context.applicationContext
-        cancelLegacyPeriodicWorks(appContext)
         WidgetTaskStore(appContext).loadTasks().forEach { task ->
             val wm = WorkManager.getInstance(appContext)
             wm.cancelUniqueWork(taskPeriodicWorkName(task.id))
             wm.cancelUniqueWork(taskChainWorkName(task.id))
             wm.cancelUniqueWork(immediateWorkName(task.id))
         }
-        wmCancelLegacyImmediate(appContext)
         AppLog.i(TAG, "已取消全部任务定时")
-    }
-
-    private fun wmCancelLegacyImmediate(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_IMMEDIATE)
-    }
-
-    private fun cancelLegacyPeriodicWorks(context: Context) {
-        val wm = WorkManager.getInstance(context)
-        wm.cancelUniqueWork("widget_aihot_periodic")
-        wm.cancelUniqueWork("widget_aihot_periodic_chain")
     }
 
     fun enqueueImmediateRefresh(
@@ -200,11 +184,11 @@ object HomeWidgetCoordinator {
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int,
     ) {
-        val views = RemoteViews(context.packageName, R.layout.widget_layout)
         val tasks = WidgetTaskStore(context).loadEnabledTasks()
         val displayState = WidgetDisplayState(context)
 
         if (tasks.isEmpty()) {
+            val views = RemoteViews(context.packageName, R.layout.widget_layout_text)
             views.setViewVisibility(R.id.widget_body, View.GONE)
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
             views.setViewVisibility(R.id.widget_page_prev, View.GONE)
@@ -215,37 +199,40 @@ object HomeWidgetCoordinator {
             return
         }
 
-        views.setViewVisibility(R.id.widget_body, View.VISIBLE)
-        views.setViewVisibility(R.id.widget_empty, View.GONE)
-
         val pageIndex = displayState.getPageIndex(appWidgetId, tasks.size)
         val task = tasks[pageIndex]
         val slot = task.cacheSlot
         val cache = WidgetCache(context)
         val refreshing = cache.isRefreshing(slot)
         val hasContent = cache.hasCachedContent(slot)
+        val template = cache.getTemplate(slot).orEmpty()
+        val layoutRes = HomeWidgetLayoutSelector.layoutRes(template, cache, slot, hasContent)
+        val views = RemoteViews(context.packageName, layoutRes)
+
+        views.setViewVisibility(R.id.widget_body, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_empty, View.GONE)
 
         val title = HomeWidgetDisplayFormatter.formatTitle(cache.getTitle(slot) ?: "", task.title)
-        // 刷新中保留上一版缓存，仅显示 ProgressBar；无缓存时才展示占位文案。
-        val summary =
-            when {
-                hasContent ->
-                    HomeWidgetDisplayFormatter.normalizeWidgetSummary(cache.getSummary(slot) ?: "")
-                refreshing -> context.getString(R.string.widget_loading)
-                else -> context.getString(R.string.widget_waiting_first_refresh)
-            }
         val timeLabel =
             when {
                 hasContent -> cache.getTimeLabel(slot) ?: "--:--"
                 refreshing -> context.getString(R.string.widget_loading)
                 else -> "--:--"
             }
+        val bodyText =
+            when {
+                refreshing -> context.getString(R.string.widget_loading)
+                !hasContent -> context.getString(R.string.widget_waiting_first_refresh)
+                layoutRes == R.layout.widget_layout_text ->
+                    cache.getRawContent(slot)?.trim().orEmpty()
+                else -> ""
+            }
         val hint = context.getString(R.string.widget_swipe_hint)
 
         views.setTextViewText(R.id.widget_title, title)
-        views.setTextViewText(R.id.widget_summary, summary)
         views.setTextViewText(R.id.widget_time, timeLabel)
         views.setTextViewText(R.id.widget_hint, hint)
+        HomeWidgetRemoteBinder.bindBody(views, layoutRes, cache, slot, bodyText)
         val showPager = tasks.size > 1
         views.setViewVisibility(
             R.id.widget_page_label,

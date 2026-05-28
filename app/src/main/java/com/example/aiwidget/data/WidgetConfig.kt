@@ -22,7 +22,5 @@ object WidgetConfig {
         intervalMinutes < WORK_MANAGER_MIN_PERIODIC_MINUTES
 
     const val HEADLINE_MAX_ITEMS = 5
-    const val HEADLINE_MAX_CHARS_PER_ITEM = 96
-    const val SUMMARY_MAX_CHARS = 220
     const val TITLE_MAX_CHARS = 28
 }

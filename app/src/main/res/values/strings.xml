@@ -13,6 +13,7 @@
     <string name="widget_periodic_skipped">定时任务：缓存未过期，已跳过</string>
     <string name="widget_periodic_scheduled">定时已登记：%1$d 分钟间隔，缓存 %2$d 秒</string>
     <string name="widget_tasks_scheduled">已为 %1$d 条任务登记定时</string>
+    <string name="widget_image_desc">配图</string>
     <string name="chat_new_conversation">新对话</string>
     <string name="chat_new_conversation_toast">已开始新对话，下次发送不再续接上一会话</string>
     <string name="chat_sessions_title">消息</string>

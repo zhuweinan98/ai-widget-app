@@ -102,7 +102,7 @@
                 android:src="@drawable/ic_refresh" />
         </LinearLayout>
 
-        <LinearLayout
+                        <LinearLayout
             android:id="@+id/widget_body"
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -111,16 +111,34 @@
             android:orientation="vertical">
 
             <TextView
-                android:id="@+id/widget_summary"
+                android:id="@+id/widget_headline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textColor="@color/widget_body"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textColor="@color/widget_muted"
+                android:textSize="12sp" />
+
+            <ImageView
+                android:id="@+id/widget_image"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
+                android:layout_marginTop="6dp"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:gravity="top"
-                android:lineSpacingExtra="3dp"
-                android:maxLines="5"
-                android:textColor="@color/widget_body"
-                android:textSize="13sp" />
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/widget_image_desc"
+                android:scaleType="centerCrop" />
 
             <TextView
                 android:id="@+id/widget_hint"

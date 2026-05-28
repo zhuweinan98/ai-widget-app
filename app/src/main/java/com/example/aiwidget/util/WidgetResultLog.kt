@@ -14,19 +14,35 @@ object WidgetResultLog {
 
         AppLog.i(
             TAG,
-            "[$source] status=${result.status} updated_at=${result.updatedAt.ifBlank { "-" }} " +
+            "[$source] status=${result.status} template=${result.template.ifBlank { "-" }} " +
+                "updated_at=${result.updatedAt.ifBlank { "-" }} " +
                 "can_follow_up=${result.canFollowUp} " +
                 "titleLen=${title.length} contentLen=${content.length} " +
+                "items=${result.items.size} headlineLen=${result.headline.length} " +
+                "image_url=${result.imageUrl.isNotBlank()} " +
                 "errorLen=${errorMsg.length} traceLines=${result.debugTrace.size}",
         )
         if (title.isNotBlank()) {
             AppLog.d(TAG, "[$source] title=${preview(title)}")
+        }
+        if (result.headline.isNotBlank()) {
+            AppLog.d(TAG, "[$source] headline=${preview(result.headline)}")
+        }
+        if (result.subtitle.isNotBlank()) {
+            AppLog.d(TAG, "[$source] subtitle=${preview(result.subtitle)}")
         }
         if (content.isNotBlank()) {
             AppLog.d(TAG, "[$source] content=${preview(content)}")
         }
         if (errorMsg.isNotBlank()) {
             AppLog.w(TAG, "[$source] error_msg=${preview(errorMsg)}")
+        }
+        result.items.forEachIndexed { index, item ->
+            AppLog.d(
+                TAG,
+                "[$source] item[$index] title=${item.title.trim()} " +
+                    "value=${item.value.trim()} icon=${item.icon.trim()}",
+            )
         }
         DebugTraceLog.logAll(TAG, source, result.debugTrace)
     }
