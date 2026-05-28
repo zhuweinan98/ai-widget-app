@@ -75,7 +75,8 @@ app/src/main/java/com/example/aiwidget/
 │   └── AgentRepository.kt
 ├── app/                       # 打开 App 后看到的界面（Compose）
 │   ├── AppShellViewModel.kt   # AppShellUiState、对话发送、Widget 任务编辑
-│   ├── AppShellScreen.kt      # 导航外壳 + 对话页（输入栏、快捷芯片）
+│   ├── AppShellScreen.kt      # 导航外壳 + 会话列表 / 对话页
+│   ├── ChatSessionListScreen.kt # 消息 Tab 一级：会话列表
 │   ├── SettingsScreen.kt      # API 环境、Widget 任务、定时执行记录
 │   ├── ChatMessages.kt        # 聊天气泡、trace 面板、消息模型
 │   ├── ChatMarkdownText.kt
@@ -102,7 +103,7 @@ app/src/main/java/com/example/aiwidget/
   → 持久化 session_id + ChatLocalStore；UI 更新 chatMessages
 ```
 
-启动时 `GET /chat/sessions` merge 列表；有 currentSessionId 时 `GET .../messages` 与服务端对齐。
+进入消息 Tab / 会话列表时 `GET /chat/sessions` merge 列表；点击进入某会话后再 `GET .../messages` 拉该会话历史。返回列表清空 `activeChatSessionId`。
 
 ### Widget 刷新
 

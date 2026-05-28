@@ -10,6 +10,7 @@ import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunRequest
 import com.example.aiwidget.util.AgentRequestLog
 import com.example.aiwidget.util.ChatResponseLog
+import com.example.aiwidget.util.ChatSyncLog
 import com.example.aiwidget.util.WidgetResultLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,8 +83,13 @@ class AgentRepository {
         apiKey: String,
         userId: String,
         limit: Int = 50,
-    ): List<ChatSessionSummary> =
-        RetrofitClient.createApi(baseUrl, apiKey).listChatSessions(userId, limit)
+        source: String = "chat/sync",
+    ): List<ChatSessionSummary> {
+        ChatSyncLog.logSessionsRequest(source, baseUrl, userId, limit)
+        return RetrofitClient.createApi(baseUrl, apiKey).listChatSessions(userId, limit).also {
+            ChatSyncLog.logSessionsResponse(source, it)
+        }
+    }
 
     suspend fun listChatMessages(
         baseUrl: String,
@@ -91,8 +97,13 @@ class AgentRepository {
         sessionId: String,
         userId: String,
         limit: Int = 200,
-    ): List<ChatMessageItem> =
-        RetrofitClient.createApi(baseUrl, apiKey).listChatMessages(sessionId, userId, limit)
+        source: String = "chat/sync",
+    ): List<ChatMessageItem> {
+        ChatSyncLog.logMessagesRequest(source, baseUrl, sessionId, userId, limit)
+        return RetrofitClient.createApi(baseUrl, apiKey).listChatMessages(sessionId, userId, limit).also {
+            ChatSyncLog.logMessagesResponse(source, sessionId, it)
+        }
+    }
 
     suspend fun deleteChatSession(
         baseUrl: String,

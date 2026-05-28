@@ -1,5 +1,6 @@
 package com.example.aiwidget.app
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -16,9 +17,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Person
@@ -32,16 +32,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -53,7 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.aiwidget.data.Presets
 
 /**
- * App 外壳：顶部 Tab（原文 / 消息 / 我的），下方为各页内容；输入区贴底 + imePadding。
+ * App 外壳：底部导航（消息 / 原文 / 我的）；二级对话页隐藏底栏；输入区 imePadding。
  */
 @Composable
 fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
@@ -74,15 +75,19 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val showBottomBar =
+            !(state.selectedTab == AppDestination.Chat && state.chatInConversation)
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             contentWindowInsets = AppShellContentWindowInsets(),
-            topBar = {
-                AppTabBar(
-                    selectedTab = state.selectedTab,
-                    articleAvailable = state.widgetArticles.any { it.hasContent },
-                    onSelectTab = viewModel::selectTab,
-                )
+            bottomBar = {
+                if (showBottomBar) {
+                    AppBottomBar(
+                        selectedTab = state.selectedTab,
+                        articleAvailable = state.widgetArticles.any { it.hasContent },
+                        onSelectTab = viewModel::selectTab,
+                    )
+                }
             },
         ) { innerPadding ->
             Box(
@@ -107,9 +112,9 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
                                     onLinkClick = viewModel::openBrowserLink,
                                 )
                             } else {
-                                ChatScreen(viewModel)
+                                ChatTabContent(viewModel)
                             }
-                        AppDestination.Chat -> ChatScreen(viewModel)
+                        AppDestination.Chat -> ChatTabContent(viewModel)
                         AppDestination.Mine -> SettingsScreen(viewModel)
                     }
                 }
@@ -127,55 +132,53 @@ fun AppShellScreen(viewModel: AppShellViewModel = viewModel()) {
 }
 
 @Composable
-private fun AppTabBar(
+private fun AppBottomBar(
     selectedTab: AppDestination,
     articleAvailable: Boolean,
     onSelectTab: (AppDestination) -> Unit,
 ) {
-    val selectedIndex =
-        when (selectedTab) {
-            AppDestination.Article -> 0
-            AppDestination.Chat -> 1
-            AppDestination.Mine -> 2
-        }
-    TabRow(
-        modifier = Modifier.statusBarsPadding(),
-        selectedTabIndex = selectedIndex,
-    ) {
-        Tab(
+    NavigationBar {
+        NavigationBarItem(
+            selected = selectedTab == AppDestination.Chat,
+            onClick = { onSelectTab(AppDestination.Chat) },
+            icon = { Icon(Icons.Outlined.Chat, contentDescription = null) },
+            label = { Text("消息") },
+        )
+        NavigationBarItem(
             selected = selectedTab == AppDestination.Article,
             onClick = { onSelectTab(AppDestination.Article) },
             enabled = articleAvailable,
-            text = { Text("原文") },
             icon = { Icon(Icons.Outlined.Article, contentDescription = null) },
+            label = { Text("原文") },
         )
-        Tab(
-            selected = selectedTab == AppDestination.Chat,
-            onClick = { onSelectTab(AppDestination.Chat) },
-            text = { Text("消息") },
-            icon = { Icon(Icons.Outlined.Chat, contentDescription = null) },
-        )
-        Tab(
+        NavigationBarItem(
             selected = selectedTab == AppDestination.Mine,
             onClick = { onSelectTab(AppDestination.Mine) },
-            text = { Text("我的") },
             icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
+            label = { Text("我的") },
         )
     }
 }
 
-/** Agent 对话：消息列表 + trace 条 + 底部输入区。 */
+@Composable
+private fun ChatTabContent(viewModel: AppShellViewModel) {
+    val state by viewModel.uiState.collectAsState()
+    if (state.chatInConversation) {
+        key(state.activeChatSessionId ?: "__new_chat__") {
+            ChatConversationScreen(viewModel)
+        }
+    } else {
+        ChatSessionListScreen(viewModel)
+    }
+}
+
+/** 二级对话页：气泡列表 + trace + 输入区。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChatScreen(viewModel: AppShellViewModel) {
+private fun ChatConversationScreen(viewModel: AppShellViewModel) {
     val state by viewModel.uiState.collectAsState()
-    val canStartNewChat =
-        !state.isSending &&
-            (
-                state.chatMessages.isNotEmpty() ||
-                    state.agentTraceLines.isNotEmpty() ||
-                    state.activeChatSessionId != null
-            )
+
+    BackHandler(onBack = viewModel::backToChatSessionList)
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -183,18 +186,15 @@ private fun ChatScreen(viewModel: AppShellViewModel) {
         topBar = {
             TopAppBar(
                 windowInsets = WindowInsets(0, 0, 0, 0),
-                title = { Text("Agent 对话") },
-                actions = {
-                    IconButton(
-                        onClick = viewModel::clearChat,
-                        enabled = canStartNewChat,
-                    ) {
+                navigationIcon = {
+                    IconButton(onClick = viewModel::backToChatSessionList) {
                         Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = stringResource(R.string.chat_new_conversation),
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = stringResource(R.string.chat_back_to_sessions),
                         )
                     }
                 },
+                title = {},
             )
         },
     ) { innerPadding ->

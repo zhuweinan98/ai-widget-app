@@ -9,12 +9,11 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 
 /**
- * 外层 Scaffold 内容区：statusBars 由顶部 TabRow.statusBarsPadding() 处理；底部由输入区 navigationBarsPadding + imePadding。
+ * 外层 Scaffold 内容区：顶栏 inset 交给内容；底栏由 [NavigationBar] 处理；键盘由对话输入区 imePadding。
  */
 @Composable
 fun AppShellContentWindowInsets(): WindowInsets =
     WindowInsets.safeDrawing
-        .exclude(WindowInsets.statusBars)
         .exclude(WindowInsets.navigationBars)
         .exclude(WindowInsets.ime)
 

@@ -15,4 +15,12 @@
     <string name="widget_tasks_scheduled">已为 %1$d 条任务登记定时</string>
     <string name="chat_new_conversation">新对话</string>
     <string name="chat_new_conversation_toast">已开始新对话，下次发送不再续接上一会话</string>
+    <string name="chat_sessions_title">消息</string>
+    <string name="chat_sessions_empty">暂无会话，点右上角开始新对话</string>
+    <string name="chat_session_untitled">未命名会话</string>
+    <string name="chat_conversation_new_title">新对话</string>
+    <string name="chat_back_to_sessions">返回会话列表</string>
+    <string name="chat_session_delete">删除</string>
+    <string name="chat_session_delete_success">已删除会话</string>
+    <string name="chat_session_delete_failed">删除会话失败</string>
 </resources>

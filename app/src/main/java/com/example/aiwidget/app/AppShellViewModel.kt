@@ -20,7 +20,10 @@ import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.network.AgentRepository
 import com.example.aiwidget.network.ApiException
 import com.example.aiwidget.homewidget.HomeWidgetCoordinator
+import com.example.aiwidget.util.ChatSyncLog
+import com.example.aiwidget.util.ChatTimeFormat
 import com.example.aiwidget.util.LinkNormalizer
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,6 +57,14 @@ data class WidgetArticleSnapshot(
     val hasContent: Boolean get() = rawContent.isNotBlank()
 }
 
+/** 会话列表一行（本地缓存 + 最后一条消息摘要）。 */
+data class ChatSessionRowUi(
+    val sessionId: String,
+    val title: String,
+    val updatedAtLabel: String,
+    val preview: String,
+)
+
 /**
  * App 内界面（原文 + 对话 + 设置）的全部状态。
  */
@@ -74,6 +85,10 @@ data class AppShellUiState(
     val isSending: Boolean = false,
     /** 保存 Widget 任务时的校验错误，显示在设置页。 */
     val widgetTaskSaveError: String? = null,
+    val chatSessions: List<ChatSessionRowUi> = emptyList(),
+    val chatSessionsLoading: Boolean = false,
+    /** true 时显示二级对话页；false 为会话列表。 */
+    val chatInConversation: Boolean = false,
     val chatMessages: List<ChatMessage> = emptyList(),
     /** 已展开全文的用户消息 id。 */
     val expandedChatMessageIds: Set<String> = emptySet(),
@@ -126,9 +141,11 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
     private val _uiState = MutableStateFlow(loadInitialState())
     val uiState: StateFlow<AppShellUiState> = _uiState.asStateFlow()
 
+    private var chatMessagesSyncJob: Job? = null
+
     init {
-        reloadChatMessagesFromLocal()
-        viewModelScope.launch { syncChatWithServer() }
+        reloadChatSessionsFromLocal()
+        viewModelScope.launch { syncChatSessions() }
     }
 
     private fun loadInitialState(): AppShellUiState =
@@ -139,8 +156,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             useStream = sessionPrefs.useStream,
             widgetTaskEditorRows = loadWidgetTaskEditorRows(),
             widgetPeriodicRunLogs = loadWidgetPeriodicRunLogs(),
-            chatMessages = loadChatMessagesFromLocal(),
-            activeChatSessionId = chatLocalStore.currentSessionId,
+            chatSessions = buildChatSessionRows(),
         )
 
     /** 处理启动：Launcher 默认消息；Widget 有缓存进原文并定位到对应任务 Tab。 */
@@ -165,6 +181,9 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             refreshWidgetStatusPanel()
         }
         _uiState.update { it.copy(selectedTab = tab, widgetTaskSaveError = null) }
+        if (tab == AppDestination.Chat && !_uiState.value.chatInConversation) {
+            refreshChatSessions()
+        }
     }
 
     /** 在 App 内 WebView 打开 Markdown / 对话中的链接。 */
@@ -178,9 +197,20 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(browserUrl = null) }
     }
 
-    /** 拉取服务端会话列表与当前会话消息，与 [ChatLocalStore] merge。 */
+    /** 拉取会话列表；若在二级对话页则同时拉当前会话消息。 */
     fun refreshChatFromServer() {
-        viewModelScope.launch { syncChatWithServer() }
+        viewModelScope.launch {
+            syncChatSessions()
+            val viewing = _uiState.value
+            val sessionId = viewing.activeChatSessionId?.trim().orEmpty()
+            if (viewing.chatInConversation && sessionId.isNotEmpty()) {
+                syncChatMessagesForSession(sessionId)
+            }
+        }
+    }
+
+    fun refreshChatSessions() {
+        viewModelScope.launch { syncChatSessions() }
     }
 
     /** 从 [WidgetCache] 重载全部 enabled 任务原文；保留或切换 [selectedWidgetArticleTaskId]。 */
@@ -339,18 +369,110 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** 从会话列表进入新对话（二级页，尚无 session_id）。 */
+    fun startNewConversation() {
+        chatMessagesSyncJob?.cancel()
+        bindActiveChatSession(null)
+        _uiState.update {
+            it.copy(
+                chatInConversation = true,
+                chatMessages = emptyList(),
+                expandedChatMessageIds = emptySet(),
+                agentTraceLines = emptyList(),
+            )
+        }
+    }
+
+    /** 打开已有会话的对话页，并拉取该会话消息。 */
+    fun openChatSession(sessionId: String) {
+        val id = sessionId.trim()
+        if (id.isEmpty()) return
+        chatMessagesSyncJob?.cancel()
+        bindActiveChatSession(id)
+        _uiState.update {
+            it.copy(
+                chatInConversation = true,
+                chatMessages = loadChatMessagesFromLocal(id),
+                expandedChatMessageIds = emptySet(),
+                agentTraceLines = emptyList(),
+            )
+        }
+        chatMessagesSyncJob =
+            viewModelScope.launch {
+                syncChatMessagesForSession(id)
+            }
+    }
+
+    /** 删除会话：服务端成功后再清本地；失败则保留本地并 Toast。 */
+    fun deleteChatSession(sessionId: String) {
+        val id = sessionId.trim()
+        if (id.isEmpty()) return
+        chatMessagesSyncJob?.cancel()
+        viewModelScope.launch {
+            val state = _uiState.value
+            val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
+            val app = getApplication<Application>()
+            try {
+                agentRepository.deleteChatSession(
+                    baseUrl = state.baseUrl,
+                    apiKey = state.apiKey,
+                    sessionId = id,
+                    userId = userId,
+                )
+                chatLocalStore.deleteSession(id)
+                if (_uiState.value.activeChatSessionId == id) {
+                    bindActiveChatSession(null)
+                    _uiState.update {
+                        it.copy(
+                            chatInConversation = false,
+                            chatMessages = emptyList(),
+                            expandedChatMessageIds = emptySet(),
+                            agentTraceLines = emptyList(),
+                        )
+                    }
+                }
+                reloadChatSessionsFromLocal()
+                Toast.makeText(
+                    app,
+                    app.getString(R.string.chat_session_delete_success),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } catch (_: Exception) {
+                Toast.makeText(
+                    app,
+                    app.getString(R.string.chat_session_delete_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    /** 从对话页返回会话列表（清空当前 session 指针）。 */
+    fun backToChatSessionList() {
+        chatMessagesSyncJob?.cancel()
+        bindActiveChatSession(null)
+        _uiState.update {
+            it.copy(
+                chatInConversation = false,
+                chatMessages = emptyList(),
+                expandedChatMessageIds = emptySet(),
+                agentTraceLines = emptyList(),
+            )
+        }
+        refreshChatSessions()
+    }
+
     /**
-     * 新对话：清空 UI 与 [activeChatSessionId]。
-     * 下次发送不带 session_id，服务端开新 thread，避免上下文 token 累积。
+     * 二级页「新对话」：清空续聊 session，下次发送开新 thread。
      */
     fun clearChat() {
-        chatLocalStore.clearCurrentConversation()
+        chatMessagesSyncJob?.cancel()
+        bindActiveChatSession(null)
         _uiState.update {
             it.copy(
                 chatMessages = emptyList(),
                 expandedChatMessageIds = emptySet(),
                 agentTraceLines = emptyList(),
-                activeChatSessionId = null,
             )
         }
         val app = getApplication<Application>()
@@ -420,8 +542,10 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             it.copy(message = if (overrideMessage == null) "" else it.message)
         }
         val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
-        val sessionId = chatLocalStore.currentSessionId
-        appendUserChatMessage(message, userMessageSummary)
+        val sessionId = activeChatSessionIdForSend()
+        val sentAtMs = System.currentTimeMillis()
+        val sentAt = ChatTimeFormat.formatCreatedAt(sentAtMs)
+        appendUserChatMessage(message, userMessageSummary, sentAtMs)
         if (sessionId != null) {
             chatLocalStore.appendMessage(
                 StoredChatMessage(
@@ -429,6 +553,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                     sessionId = sessionId,
                     role = "user",
                     content = message,
+                    createdAt = sentAt,
                     localOnly = true,
                 ),
             )
@@ -553,7 +678,11 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(chatMessages = it.chatMessages + message) }
     }
 
-    private fun appendUserChatMessage(fullPrompt: String, summary: String? = null) {
+    private fun appendUserChatMessage(
+        fullPrompt: String,
+        summary: String? = null,
+        timestampMs: Long = System.currentTimeMillis(),
+    ) {
         val displaySummary = summary ?: summarizePrompt(fullPrompt)
         appendChat(
             ChatMessage(
@@ -562,6 +691,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                 kind = ChatKind.UserPrompt,
                 summary = displaySummary,
                 fullText = fullPrompt,
+                timestampMs = timestampMs,
             ),
         )
     }
@@ -589,41 +719,101 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    private fun loadChatMessagesFromLocal(): List<ChatMessage> {
-        val sessionId = chatLocalStore.currentSessionId ?: return emptyList()
-        return chatLocalStore.loadMessages(sessionId).map { it.toChatMessage() }
+    private fun bindActiveChatSession(sessionId: String?) {
+        val id = sessionId?.trim()?.takeIf { it.isNotEmpty() }
+        chatLocalStore.currentSessionId = id
+        _uiState.update { it.copy(activeChatSessionId = id) }
     }
 
-    private fun reloadChatMessagesFromLocal() {
-        val messages = loadChatMessagesFromLocal()
-        if (messages.isNotEmpty()) {
-            _uiState.update { it.copy(chatMessages = messages) }
-        }
+    private fun activeChatSessionIdForSend(): String? {
+        val state = _uiState.value
+        if (!state.chatInConversation) return null
+        return state.activeChatSessionId?.trim()?.takeIf { it.isNotEmpty() }
     }
 
-    private suspend fun syncChatWithServer() {
+    private fun isViewingChatSession(sessionId: String): Boolean {
+        val state = _uiState.value
+        return state.chatInConversation && state.activeChatSessionId == sessionId.trim()
+    }
+
+    private fun loadChatMessagesFromLocal(sessionId: String): List<ChatMessage> {
+        val id = sessionId.trim()
+        if (id.isEmpty()) return emptyList()
+        return chatLocalStore.loadMessages(id).map { it.toChatMessage() }
+    }
+
+    private fun reloadChatMessagesFromLocal(sessionId: String) {
+        val id = sessionId.trim()
+        if (id.isEmpty() || !isViewingChatSession(id)) return
+        _uiState.update { it.copy(chatMessages = loadChatMessagesFromLocal(id)) }
+    }
+
+    private fun reloadChatSessionsFromLocal() {
+        _uiState.update { it.copy(chatSessions = buildChatSessionRows()) }
+    }
+
+    private fun buildChatSessionRows(): List<ChatSessionRowUi> =
+        chatLocalStore.loadSessions()
+            .filter { it.sessionId.isNotBlank() }
+            .map { session ->
+                val lastMessage = chatLocalStore.loadMessages(session.sessionId).lastOrNull()
+                val preview =
+                    lastMessage?.let { msg ->
+                        summarizePrompt(msg.content, maxLen = 56)
+                    }.orEmpty()
+                ChatSessionRowUi(
+                    sessionId = session.sessionId,
+                    title = session.title,
+                    updatedAtLabel = ChatTimeFormat.formatSessionListLabel(session.updatedAt),
+                    preview = preview,
+                )
+            }
+
+    private suspend fun syncChatSessions(source: String = "chat/sync") {
         val state = _uiState.value
         val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
+        _uiState.update { it.copy(chatSessionsLoading = true) }
         try {
             val sessions =
                 agentRepository.listChatSessions(
                     baseUrl = state.baseUrl,
                     apiKey = state.apiKey,
                     userId = userId,
+                    source = source,
                 )
             chatLocalStore.mergeSessionsFromServer(sessions)
-            val sessionId = chatLocalStore.currentSessionId ?: return
+            reloadChatSessionsFromLocal()
+        } catch (e: Exception) {
+            ChatSyncLog.logFailure(source, "sessions", e)
+            reloadChatSessionsFromLocal()
+        } finally {
+            _uiState.update { it.copy(chatSessionsLoading = false) }
+        }
+    }
+
+    private suspend fun syncChatMessagesForSession(
+        sessionId: String,
+        source: String = "chat/sync",
+    ) {
+        val id = sessionId.trim()
+        if (id.isEmpty() || !isViewingChatSession(id)) return
+        val state = _uiState.value
+        val userId = state.userId.trim().ifEmpty { appPrefs.getOrCreateUserId() }
+        try {
             val remote =
                 agentRepository.listChatMessages(
                     baseUrl = state.baseUrl,
                     apiKey = state.apiKey,
-                    sessionId = sessionId,
+                    sessionId = id,
                     userId = userId,
+                    source = source,
                 )
-            chatLocalStore.replaceMessagesFromServer(sessionId, remote)
-            reloadChatMessagesFromLocal()
-        } catch (_: Exception) {
-            // 离线保留本地缓存
+            if (!isViewingChatSession(id)) return
+            chatLocalStore.replaceMessagesFromServer(id, remote)
+            reloadChatMessagesFromLocal(id)
+            reloadChatSessionsFromLocal()
+        } catch (e: Exception) {
+            ChatSyncLog.logFailure(source, "messages/$id", e)
         }
     }
 
@@ -634,8 +824,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         val sessionId = response.sessionId.trim()
         if (sessionId.isEmpty()) return
 
-        chatLocalStore.currentSessionId = sessionId
-        _uiState.update { it.copy(activeChatSessionId = sessionId) }
+        bindActiveChatSession(sessionId)
         chatLocalStore.upsertSession(
             ChatSessionSummary(
                 sessionId = sessionId,
@@ -644,11 +833,21 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             ),
         )
 
+        val assistantCreatedAt =
+            response.updatedAt.trim().ifBlank { ChatTimeFormat.formatCreatedAt() }
         val messages = chatLocalStore.loadMessages(sessionId).toMutableList()
         val userIndex =
             messages.indexOfLast { it.role == "user" && it.content == userMessage }
         if (userIndex >= 0) {
-            messages[userIndex] = messages[userIndex].copy(localOnly = false)
+            val existing = messages[userIndex]
+            messages[userIndex] =
+                existing.copy(
+                    localOnly = false,
+                    createdAt =
+                        existing.createdAt.trim().ifBlank {
+                            ChatTimeFormat.formatCreatedAt()
+                        },
+                )
         } else {
             messages.add(
                 StoredChatMessage(
@@ -656,6 +855,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                     sessionId = sessionId,
                     role = "user",
                     content = userMessage,
+                    createdAt = ChatTimeFormat.formatCreatedAt(),
                     localOnly = false,
                 ),
             )
@@ -670,9 +870,11 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                 sessionId = sessionId,
                 role = "assistant",
                 content = assistantBody,
+                createdAt = assistantCreatedAt,
                 localOnly = false,
             ),
         )
         chatLocalStore.saveMessages(sessionId, messages)
+        reloadChatSessionsFromLocal()
     }
 }

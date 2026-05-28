@@ -54,9 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.aiwidget.data.ChatResponse
 import com.example.aiwidget.data.StoredChatMessage
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import com.example.aiwidget.util.ChatTimeFormat
 import java.util.UUID
 
 enum class ChatRole {
@@ -269,12 +267,14 @@ fun chatMessageFromChatResponse(result: ChatResponse): ChatMessage {
         kind = if (result.status == "error") ChatKind.Error else ChatKind.Result,
         summary = summary,
         fullText = fullText,
+        timestampMs = ChatTimeFormat.toEpochMillis(result.updatedAt),
     )
 }
 
 /** 本地缓存消息 → 对话 UI。 */
-fun StoredChatMessage.toChatMessage(): ChatMessage =
-    when (role.lowercase()) {
+fun StoredChatMessage.toChatMessage(): ChatMessage {
+    val timestampMs = ChatTimeFormat.toEpochMillis(createdAt)
+    return when (role.lowercase()) {
         "user" ->
             ChatMessage(
                 id = localId,
@@ -282,6 +282,7 @@ fun StoredChatMessage.toChatMessage(): ChatMessage =
                 kind = ChatKind.UserPrompt,
                 summary = summarizePrompt(content),
                 fullText = content,
+                timestampMs = timestampMs,
             )
         else ->
             ChatMessage(
@@ -295,8 +296,10 @@ fun StoredChatMessage.toChatMessage(): ChatMessage =
                         content.take(200) + "…"
                     },
                 fullText = content,
+                timestampMs = timestampMs,
             )
     }
+}
 
 @Composable
 private fun UserMessageRow(
@@ -336,7 +339,7 @@ private fun UserMessageRow(
                 }
             }
             Text(
-                formatChatTime(message.timestampMs),
+                ChatTimeFormat.formatMessageBubbleTime(message.timestampMs),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -440,11 +443,6 @@ private fun agentSenderLabel(kind: ChatKind): String =
         ChatKind.Error -> "Agent · 错误"
         ChatKind.UserPrompt -> "Agent"
     }
-
-private fun formatChatTime(ms: Long): String {
-    if (ms <= 0L) return ""
-    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
-}
 
 private fun agentTurnDisplayText(title: String, content: String, errorMsg: String): String {
     val t = title.trim()
