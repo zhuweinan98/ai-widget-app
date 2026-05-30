@@ -37,6 +37,10 @@ object Presets {
     /** 当日日报（芯片「今日日报」）。 */
     const val AI_DAILY_USER_MESSAGE = "今天的 AI 日报有哪些主要内容？"
 
+    /** 医学新闻·心血管（默认定时「医学新闻·心血管」任务 prompt）。 */
+    const val MED_NEWS_CARDIO_WIDGET_MESSAGE =
+        "请查医学界、医脉通等渠道的今日医学新闻，优先心血管相关，保留原文链接，勿编造。"
+
     /** 持仓盈亏（芯片 + 默认定时「持仓盈亏」）；改持仓直接改此处。 */
     fun holdingsUserMessage(): String =
         """

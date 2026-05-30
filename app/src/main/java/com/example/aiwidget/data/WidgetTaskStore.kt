@@ -40,6 +40,14 @@ class WidgetTaskStore(context: Context) {
                 cacheTtlSeconds = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
             ),
             WidgetTask(
+                id = "widget_med_news_cardio",
+                title = "医学新闻·心血管",
+                prompt = Presets.MED_NEWS_CARDIO_WIDGET_MESSAGE,
+                cacheSlot = "med_news_cardio",
+                intervalMinutes = WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES,
+                cacheTtlSeconds = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
+            ),
+            WidgetTask(
                 id = WidgetTask.HOLDINGS_TASK_ID,
                 title = "持仓盈亏",
                 prompt = Presets.holdingsUserMessage(),

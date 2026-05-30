@@ -357,7 +357,7 @@ private fun WidgetTaskEditorRowUi(
             value = row.prompt,
             onValueChange = onPromptChange,
             label = { Text("任务内容（自然语言）") },
-            supportingText = { Text("原样作为 /widget/run 的 message；展示格式由服务端决定") },
+            supportingText = { Text("保存后原样作为 /widget/run 的 message；展示格式由服务端决定") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 4,
