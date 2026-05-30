@@ -54,7 +54,7 @@ object HomeWidgetRefreshRunner {
         if (isPeriodicTrigger) {
             AppLog.i(
                 TAG,
-                "定时 task=${task.id} interval=${taskStore.intervalMinutes(task)}min TTL=${cacheTtlSeconds}s",
+                "定时 task=${task.id} interval=${taskStore.intervalMinutes(task)}min TTL=${cacheTtlSeconds / 60}min",
             )
         }
 

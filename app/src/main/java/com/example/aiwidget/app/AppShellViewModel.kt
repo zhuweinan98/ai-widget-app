@@ -16,10 +16,17 @@ import com.example.aiwidget.data.StoredChatMessage
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunLogStore
 import com.example.aiwidget.data.WidgetCache
+import com.example.aiwidget.data.WidgetConfig
+import com.example.aiwidget.data.WidgetTask
 import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.network.AgentRepository
 import com.example.aiwidget.network.ApiException
+import com.example.aiwidget.homewidget.HomeWidgetAlarmScheduler
 import com.example.aiwidget.homewidget.HomeWidgetCoordinator
+import com.example.aiwidget.homewidget.HomeWidgetRefreshRunner
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.aiwidget.util.ChatSyncLog
 import com.example.aiwidget.util.ChatTimeFormat
 import com.example.aiwidget.util.LinkNormalizer
@@ -96,6 +103,8 @@ data class AppShellUiState(
     val agentTraceLines: List<String> = emptyList(),
     /** 设置页 Widget 任务编辑表单，与 [WidgetTaskStore] 对应。 */
     val widgetTaskEditorRows: List<WidgetTaskEditorRow> = emptyList(),
+    /** 设置页下拉应选中的任务 id（添加/删除后一次性消费）。 */
+    val widgetPendingSelectTaskId: String? = null,
     /** Widget 定时任务执行历史（仅 periodic），供设置页展示。 */
     val widgetPeriodicRunLogs: List<WidgetRunLogEntry> = emptyList(),
     /** 各 enabled 任务的原文（有/无缓存均列出，供顶部 Tab 切换）。 */
@@ -118,7 +127,8 @@ data class WidgetTaskEditorRow(
     val title: String,
     val prompt: String,
     val intervalMinutes: String,
-    val cacheTtlSeconds: String,
+    /** 缓存有效期（分钟）；保存时转为 [WidgetTask.cacheTtlSeconds]。 */
+    val cacheTtlMinutes: String,
     /** false 时不登记闹钟定时。 */
     val enabled: Boolean = true,
 )
@@ -275,6 +285,48 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
     private fun loadWidgetPeriodicRunLogs(): List<WidgetRunLogEntry> =
         WidgetRunLogStore(getApplication()).loadRecent()
 
+    /**
+     * 设置页保存后刷新：App 在前台，直接跑 [HomeWidgetRefreshRunner]（不依赖 FGS/通知权限）。
+     * 先切 Widget 到该任务页并显示 loading，避免 Toast 已提示但桌面仍停在旧页/旧内容。
+     */
+    private fun refreshWidgetTaskAfterSave(taskId: String) {
+        val app = getApplication<Application>()
+        HomeWidgetCoordinator.prepareRefreshUiForTask(app, taskId)
+        viewModelScope.launch {
+            try {
+                HomeWidgetRefreshRunner.run(
+                    context = app,
+                    taskId = taskId,
+                    forceRefresh = true,
+                    trigger = HomeWidgetCoordinator.TRIGGER_IMMEDIATE,
+                )
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        app,
+                        "刷新失败：${e.message ?: "未知错误"}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+            refreshWidgetArticles(preferredTaskId = taskId)
+        }
+    }
+
+    private fun clearWidgetTaskCache(task: WidgetTask) {
+        val app = getApplication<Application>()
+        WidgetCache(app).clearSlot(task.cacheSlot)
+        val imageFile = File(app.filesDir, "widget_images/${task.cacheSlot}.jpg")
+        if (imageFile.exists()) {
+            imageFile.delete()
+        }
+    }
+
+    private fun cacheTtlMinutesForEditor(ttlSeconds: Int): String {
+        if (ttlSeconds <= 0) return "0"
+        return ((ttlSeconds + 59) / 60).toString()
+    }
+
     private fun loadWidgetTaskEditorRows(): List<WidgetTaskEditorRow> {
         val store = WidgetTaskStore(getApplication())
         return store.loadTasks().map { task ->
@@ -283,7 +335,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
                 title = task.title,
                 prompt = task.prompt,
                 intervalMinutes = store.intervalMinutes(task).toString(),
-                cacheTtlSeconds = store.cacheTtlSeconds(task).toString(),
+                cacheTtlMinutes = cacheTtlMinutesForEditor(store.cacheTtlSeconds(task)),
                 enabled = task.enabled,
             )
         }
@@ -305,8 +357,8 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         updateWidgetTaskEditorRow(taskId) { it.copy(intervalMinutes = value) }
     }
 
-    fun updateTaskCacheTtl(taskId: String, value: String) {
-        updateWidgetTaskEditorRow(taskId) { it.copy(cacheTtlSeconds = value) }
+    fun updateTaskCacheTtlMinutes(taskId: String, value: String) {
+        updateWidgetTaskEditorRow(taskId) { it.copy(cacheTtlMinutes = value) }
     }
 
     private fun updateWidgetTaskEditorRow(
@@ -489,6 +541,69 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         commitWidgetTaskEditorRow(taskId, showToast = true, reschedule = true)
     }
 
+    fun addWidgetTask() {
+        val app = getApplication<Application>()
+        val store = WidgetTaskStore(app)
+        if (store.loadTasks().size >= WidgetConfig.MAX_WIDGET_TASKS) {
+            _uiState.update {
+                it.copy(
+                    widgetTaskSaveError =
+                        app.getString(R.string.widget_task_max_reached, WidgetConfig.MAX_WIDGET_TASKS),
+                )
+            }
+            return
+        }
+        val task = store.createNewTask()
+        if (!store.addTask(task)) {
+            _uiState.update { it.copy(widgetTaskSaveError = "添加任务失败") }
+            return
+        }
+        HomeWidgetCoordinator.renderAllWidgets(app)
+        _uiState.update {
+            it.copy(
+                widgetTaskEditorRows = loadWidgetTaskEditorRows(),
+                widgetTaskSaveError = null,
+                widgetPendingSelectTaskId = task.id,
+            )
+        }
+        Toast.makeText(app, app.getString(R.string.widget_task_added), Toast.LENGTH_SHORT).show()
+    }
+
+    fun deleteWidgetTask(taskId: String) {
+        val app = getApplication<Application>()
+        val store = WidgetTaskStore(app)
+        if (store.loadTasks().size <= 1) {
+            _uiState.update {
+                it.copy(widgetTaskSaveError = app.getString(R.string.widget_task_keep_one))
+            }
+            return
+        }
+        val task = store.findTask(taskId) ?: return
+        HomeWidgetAlarmScheduler.cancel(app, taskId)
+        clearWidgetTaskCache(task)
+        if (!store.removeTask(taskId)) {
+            _uiState.update { it.copy(widgetTaskSaveError = "删除任务失败") }
+            return
+        }
+        HomeWidgetCoordinator.renderAllWidgets(app)
+        val rows = loadWidgetTaskEditorRows()
+        _uiState.update {
+            it.copy(
+                widgetTaskEditorRows = rows,
+                widgetTaskSaveError = null,
+                widgetPendingSelectTaskId = rows.firstOrNull()?.id,
+            )
+        }
+        refreshWidgetArticles()
+        Toast.makeText(app, app.getString(R.string.widget_task_deleted), Toast.LENGTH_SHORT).show()
+    }
+
+    fun consumeWidgetPendingSelectTaskId() {
+        if (_uiState.value.widgetPendingSelectTaskId != null) {
+            _uiState.update { it.copy(widgetPendingSelectTaskId = null) }
+        }
+    }
+
     /** 恢复为内置默认任务列表（1h 速报 + 持仓盈亏）。 */
     fun resetWidgetTasksToDefaults() {
         val store = WidgetTaskStore(getApplication())
@@ -498,6 +613,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 widgetTaskEditorRows = loadWidgetTaskEditorRows(),
                 widgetTaskSaveError = null,
+                widgetPendingSelectTaskId = "widget_main",
             )
         }
         HomeWidgetCoordinator.scheduleEnabledWidgetTasks(getApplication(), showScheduleToast = false)
@@ -631,7 +747,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
         }
         val existing = tasks[index]
         val interval = row.intervalMinutes.trim().toLongOrNull()
-        val ttl = row.cacheTtlSeconds.trim().toIntOrNull()
+        val ttlMinutes = row.cacheTtlMinutes.trim().toIntOrNull()
         val title = row.title.trim().ifBlank { existing.title }
         val prompt = row.prompt.trim()
         if (prompt.isEmpty()) {
@@ -648,20 +764,21 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             }
             return false
         }
-        if (ttl == null || ttl < 0) {
+        if (ttlMinutes == null || ttlMinutes < 0) {
             if (showToast || reschedule) {
                 _uiState.update {
-                    it.copy(widgetTaskSaveError = "「$title」缓存 TTL 须为 ≥0 的整数（秒）")
+                    it.copy(widgetTaskSaveError = "「$title」缓存须为 ≥0 的整数（分钟）")
                 }
             }
             return false
         }
+        val ttlSeconds = ttlMinutes * 60
         tasks[index] =
             existing.copy(
                 title = title,
                 prompt = prompt,
                 intervalMinutes = interval,
-                cacheTtlSeconds = ttl,
+                cacheTtlSeconds = ttlSeconds,
                 enabled = row.enabled,
             )
         store.saveTasks(tasks)
@@ -672,14 +789,19 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             )
         }
         if (reschedule) {
-            HomeWidgetCoordinator.scheduleWidgetTask(getApplication(), taskId)
-            HomeWidgetCoordinator.renderAllWidgets(getApplication())
+            val app = getApplication<Application>()
+            HomeWidgetCoordinator.scheduleWidgetTask(app, taskId)
+            if (row.enabled) {
+                refreshWidgetTaskAfterSave(taskId)
+            } else {
+                HomeWidgetCoordinator.renderAllWidgets(app)
+            }
         }
         if (showToast) {
             val app = getApplication<Application>()
             val message =
                 if (row.enabled) {
-                    app.getString(R.string.widget_task_saved_enabled, title, interval, ttl)
+                    app.getString(R.string.widget_task_saved_enabled, title, interval, ttlMinutes)
                 } else {
                     app.getString(R.string.widget_task_saved_disabled, title)
                 }

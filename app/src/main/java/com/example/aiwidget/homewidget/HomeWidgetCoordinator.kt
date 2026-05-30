@@ -132,6 +132,29 @@ object HomeWidgetCoordinator {
         }
     }
 
+    /**
+     * 刷新前立即更新桌面：切到 [taskId] 对应页并显示 loading（须在启动 API 前调用）。
+     * @return 是否至少有一个 Widget 实例被更新
+     */
+    fun prepareRefreshUiForTask(context: Context, taskId: String): Boolean {
+        val appContext = context.applicationContext
+        val tasks = WidgetTaskStore(appContext).loadEnabledTasks()
+        val pageIndex = tasks.indexOfFirst { it.id == taskId }
+        if (pageIndex < 0) return false
+        val task = tasks[pageIndex]
+        WidgetCache(appContext).setRefreshing(task.cacheSlot, true)
+        val manager = AppWidgetManager.getInstance(appContext)
+        val component = ComponentName(appContext, HomeWidgetProvider::class.java)
+        val ids = manager.getAppWidgetIds(component)
+        if (ids.isEmpty()) return false
+        val displayState = WidgetDisplayState(appContext)
+        ids.forEach { widgetId ->
+            displayState.setPageIndex(widgetId, pageIndex)
+            bindWidget(appContext, manager, widgetId)
+        }
+        return true
+    }
+
     fun enqueueImmediateRefresh(
         context: Context,
         taskId: String?,

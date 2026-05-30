@@ -3,6 +3,7 @@ package com.example.aiwidget.data
 import android.content.Context
 import com.example.aiwidget.network.RetrofitClient
 import com.squareup.moshi.Types
+import java.util.UUID
 
 /**
  * Widget 定时任务列表的读写（JSON 存在 [AppPrefs] 同一 SharedPreferences 文件）。
@@ -82,6 +83,42 @@ class WidgetTaskStore(context: Context) {
     fun cacheTtlSeconds(task: WidgetTask): Int = task.cacheTtlSeconds.coerceAtLeast(0)
 
     fun intervalMinutes(task: WidgetTask): Long = task.intervalMinutes.coerceAtLeast(1L)
+
+    fun newTaskId(): String = "widget_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+
+    /** 新建空白任务（[cacheSlot] 与 [id] 相同，避免与其它任务共用缓存）。 */
+    fun createNewTask(): WidgetTask {
+        val id = newTaskId()
+        return WidgetTask(
+            id = id,
+            title = "新任务",
+            prompt = "",
+            cacheSlot = id,
+            enabled = false,
+            intervalMinutes = WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES,
+            cacheTtlSeconds = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,
+        )
+    }
+
+    fun addTask(task: WidgetTask): Boolean {
+        if (task.id.isBlank()) return false
+        val tasks = loadTasks().toMutableList()
+        if (tasks.size >= WidgetConfig.MAX_WIDGET_TASKS) return false
+        if (tasks.any { it.id == task.id }) return false
+        if (tasks.any { it.cacheSlot == task.cacheSlot && it.id != task.id }) return false
+        tasks.add(task)
+        saveTasks(tasks)
+        return true
+    }
+
+    fun removeTask(taskId: String): Boolean {
+        val tasks = loadTasks().toMutableList()
+        if (tasks.size <= 1) return false
+        val removed = tasks.removeAll { it.id == taskId }
+        if (!removed) return false
+        saveTasks(tasks)
+        return true
+    }
 
     companion object {
         private const val KEY_TASKS_JSON = "widget_tasks_json"

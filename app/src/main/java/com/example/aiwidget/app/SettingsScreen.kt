@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,6 +55,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.aiwidget.R
 import com.example.aiwidget.data.Presets
+import com.example.aiwidget.data.WidgetConfig
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunOutcome
 import com.example.aiwidget.homewidget.HomeWidgetSystemPermissions
@@ -173,6 +175,7 @@ private fun WidgetTaskEditorSection(state: AppShellUiState, viewModel: AppShellV
     val rows = state.widgetTaskEditorRows
     var taskMenuExpanded by remember { mutableStateOf(false) }
     var selectedTaskId by remember { mutableStateOf<String?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(rows.map { it.id }) {
         if (selectedTaskId == null || rows.none { it.id == selectedTaskId }) {
@@ -180,8 +183,15 @@ private fun WidgetTaskEditorSection(state: AppShellUiState, viewModel: AppShellV
         }
     }
 
+    LaunchedEffect(state.widgetPendingSelectTaskId) {
+        state.widgetPendingSelectTaskId?.let { pendingId ->
+            selectedTaskId = pendingId
+            viewModel.consumeWidgetPendingSelectTaskId()
+        }
+    }
+
     Text(
-        "共 ${rows.size} 条 · 取消启用则不定时且不在 Widget 展示 · 编辑后点保存",
+        "共 ${rows.size} 条（最多 ${WidgetConfig.MAX_WIDGET_TASKS} 条）· 可添加自定义任务 · 编辑后点保存",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -244,8 +254,58 @@ private fun WidgetTaskEditorSection(state: AppShellUiState, viewModel: AppShellV
             onPromptChange = { viewModel.updateTaskPrompt(row.id, it) },
             onEnabledChange = { viewModel.updateTaskEnabled(row.id, it) },
             onIntervalChange = { viewModel.updateTaskInterval(row.id, it) },
-            onTtlChange = { viewModel.updateTaskCacheTtl(row.id, it) },
+            onTtlChange = { viewModel.updateTaskCacheTtlMinutes(row.id, it) },
             onSave = { viewModel.saveWidgetTask(row.id) },
+        )
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(
+            onClick = viewModel::addWidgetTask,
+            modifier = Modifier.weight(1f),
+            enabled = rows.size < WidgetConfig.MAX_WIDGET_TASKS,
+        ) {
+            Text(stringResource(R.string.widget_task_add))
+        }
+        OutlinedButton(
+            onClick = { showDeleteConfirm = true },
+            modifier = Modifier.weight(1f),
+            enabled = rows.size > 1 && selectedTaskId != null,
+        ) {
+            Text(stringResource(R.string.widget_task_delete))
+        }
+    }
+
+    if (showDeleteConfirm && selectedRow != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.widget_task_delete_confirm_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.widget_task_delete_confirm_message,
+                        selectedRow.title.ifBlank { selectedRow.id },
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteWidgetTask(selectedRow.id)
+                    },
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("取消")
+                }
+            },
         )
     }
 
@@ -317,9 +377,9 @@ private fun WidgetTaskEditorRowUi(
                 enabled = row.enabled,
             )
             OutlinedTextField(
-                value = row.cacheTtlSeconds,
+                value = row.cacheTtlMinutes,
                 onValueChange = onTtlChange,
-                label = { Text("缓存(秒)") },
+                label = { Text("缓存(分)") },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 enabled = row.enabled,

@@ -80,6 +80,25 @@ class WidgetCache(context: Context) {
             !getHeadline(slot).isNullOrBlank()
     }
 
+    /** 删除任务时清空该 [cacheSlot] 的展示缓存（不含其它 slot）。 */
+    fun clearSlot(slot: String) {
+        val editor = prefs.edit()
+        editor
+            .remove("${slot}_title")
+            .remove("${slot}_template")
+            .remove("${slot}$KEY_ITEMS_SUFFIX")
+            .remove("${slot}_headline")
+            .remove("${slot}_subtitle")
+            .remove("${slot}_image_path")
+            .remove("${slot}_raw_content")
+            .remove("${slot}_time_label")
+            .remove("${slot}_timestamp")
+            .remove("${slot}_refreshing")
+            .remove("${slot}_content")
+            .remove("${slot}_summary")
+        editor.apply()
+    }
+
     private fun decodeList(slot: String, suffix: String): List<WidgetListItem> {
         val raw = prefs.getString("${slot}$suffix", null) ?: return emptyList()
         return try {
