@@ -74,7 +74,7 @@ class WidgetTaskStore(context: Context) {
         return true
     }
 
-    /** 参与 WorkManager 定时的任务（enabled = true）。 */
+    /** 参与闹钟定时的任务（enabled = true）。 */
     fun loadEnabledTasks(): List<WidgetTask> = loadTasks().filter { it.enabled }
 
     fun findTask(taskId: String): WidgetTask? = loadTasks().find { it.id == taskId }

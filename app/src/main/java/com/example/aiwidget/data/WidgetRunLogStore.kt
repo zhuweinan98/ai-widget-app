@@ -6,7 +6,7 @@ import com.squareup.moshi.Types
 
 /**
  * Widget 定时任务执行日志（JSON 数组，存于 [AppPrefs.PREFS_NAME]）。
- * 仅 Worker 在 periodic 触发时 append；手动 ↻ 不写入。
+ * 仅闹钟定时（periodic）经 [com.example.aiwidget.homewidget.HomeWidgetRefreshRunner] 触发时 append；手动 ↻ 不写入。
  */
 class WidgetRunLogStore(context: Context) {
     private val prefs =

@@ -119,7 +119,7 @@ data class WidgetTaskEditorRow(
     val prompt: String,
     val intervalMinutes: String,
     val cacheTtlSeconds: String,
-    /** false 时不登记 WorkManager 定时。 */
+    /** false 时不登记闹钟定时。 */
     val enabled: Boolean = true,
 )
 
@@ -482,8 +482,7 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * 校验并持久化一条 Widget 任务，并按需重新登记 WorkManager。
-     * @param showToast 保存成功时 Toast
+     * 校验并持久化一条 Widget 任务，并按需重新登记闹钟定时。
      * @param reschedule 是否刷新定时与桌面 Widget
      */
     fun saveWidgetTask(taskId: String) {
@@ -493,16 +492,26 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
     /** 恢复为内置默认任务列表（1h 速报 + 持仓盈亏）。 */
     fun resetWidgetTasksToDefaults() {
         val store = WidgetTaskStore(getApplication())
-        store.saveTasks(store.defaultTasks())
+        val defaults = store.defaultTasks()
+        store.saveTasks(defaults)
         _uiState.update {
             it.copy(
                 widgetTaskEditorRows = loadWidgetTaskEditorRows(),
                 widgetTaskSaveError = null,
             )
         }
-        HomeWidgetCoordinator.scheduleEnabledWidgetTasks(getApplication(), showScheduleToast = true)
+        HomeWidgetCoordinator.scheduleEnabledWidgetTasks(getApplication(), showScheduleToast = false)
+        HomeWidgetCoordinator.enqueueInitialRefreshForAllEnabledTasks(getApplication())
         HomeWidgetCoordinator.renderAllWidgets(getApplication())
-        Toast.makeText(getApplication(), "已恢复任务默认配置", Toast.LENGTH_SHORT).show()
+        val app = getApplication<Application>()
+        val enabledCount = defaults.count { it.enabled }
+        val interval = defaults.firstOrNull()?.intervalMinutes
+            ?: com.example.aiwidget.data.WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES
+        Toast.makeText(
+            app,
+            app.getString(R.string.widget_tasks_reset, enabledCount, interval),
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     /** 发送前持久化会话配置（与 [saveSessionSettings] 相同，供 UI 显式调用）。 */
@@ -663,11 +672,18 @@ class AppShellViewModel(application: Application) : AndroidViewModel(application
             )
         }
         if (reschedule) {
-            HomeWidgetCoordinator.scheduleEnabledWidgetTasks(getApplication(), showScheduleToast = false)
+            HomeWidgetCoordinator.scheduleWidgetTask(getApplication(), taskId)
             HomeWidgetCoordinator.renderAllWidgets(getApplication())
         }
         if (showToast) {
-            Toast.makeText(getApplication(), "已保存：$title", Toast.LENGTH_SHORT).show()
+            val app = getApplication<Application>()
+            val message =
+                if (row.enabled) {
+                    app.getString(R.string.widget_task_saved_enabled, title, interval, ttl)
+                } else {
+                    app.getString(R.string.widget_task_saved_disabled, title)
+                }
+            Toast.makeText(app, message, Toast.LENGTH_LONG).show()
         }
         return true
     }

@@ -5,30 +5,23 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
-import androidx.work.Data
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
+import androidx.core.content.ContextCompat
 import com.example.aiwidget.R
 import com.example.aiwidget.data.WidgetCache
-import com.example.aiwidget.data.WidgetConfig
 import com.example.aiwidget.data.WidgetDisplayState
 import com.example.aiwidget.data.WidgetTask
 import com.example.aiwidget.data.WidgetTaskStore
 import com.example.aiwidget.util.AppLog
-import java.util.concurrent.TimeUnit
 
 /**
- * 桌面小组件的 WorkManager 调度与 RemoteViews 渲染。
+ * 桌面小组件的闹钟调度、前台刷新服务与 RemoteViews 渲染。
  *
- * 单页 RemoteViews + 上一页/下一页循环切换（兼容 MIUI 等 Launcher）；
- * ↻ 仅刷新当前页对应任务。
+ * 定时： [HomeWidgetAlarmScheduler] 精确唤醒 → [HomeWidgetRefreshService]
+ * 手动 ↻：直接启动 [HomeWidgetRefreshService]
  */
 object HomeWidgetCoordinator {
     private const val TAG = "HomeWidgetCoordinator"
@@ -40,10 +33,8 @@ object HomeWidgetCoordinator {
 
     const val EXTRA_APPWIDGET_ID = "app_widget_id"
 
-    fun immediateWorkName(taskId: String): String = "widget_immediate_$taskId"
-
-    const val WORK_DATA_TASK_ID = "task_id"
-    const val WORK_DATA_TRIGGER = "trigger"
+    const val EXTRA_TASK_ID = "task_id"
+    const val EXTRA_TRIGGER = "trigger"
 
     const val TRIGGER_PERIODIC = "periodic"
     const val TRIGGER_IMMEDIATE = "immediate"
@@ -61,72 +52,84 @@ object HomeWidgetCoordinator {
             AppLog.d(TAG, "无 Widget 实例，跳过定时登记")
             return
         }
-        val store = WidgetTaskStore(appContext)
-        val enabledTasks = store.loadEnabledTasks()
-        enabledTasks.forEach { scheduleTaskPeriodic(appContext, it) }
-        AppLog.i(TAG, "已为 ${enabledTasks.size} 条任务登记定时")
+        HomeWidgetAlarmScheduler.scheduleEnabledTasks(appContext)
+        val enabledCount = WidgetTaskStore(appContext).loadEnabledTasks().size
+        AppLog.i(TAG, "已为 $enabledCount 条任务登记闹钟")
         if (showScheduleToast) {
             Toast.makeText(
                 appContext,
-                appContext.getString(R.string.widget_tasks_scheduled, enabledTasks.size),
+                appContext.getString(R.string.widget_tasks_scheduled, enabledCount),
                 Toast.LENGTH_SHORT,
             ).show()
         }
     }
 
-    fun taskPeriodicWorkName(taskId: String): String = "widget_task_periodic_$taskId"
-
-    fun taskChainWorkName(taskId: String): String = "widget_task_chain_$taskId"
-
-    private fun scheduleTaskPeriodic(context: Context, task: WidgetTask) {
-        val wm = WorkManager.getInstance(context)
-        val interval = WidgetTaskStore(context).intervalMinutes(task)
-        val input = buildWorkerInputData(task.id, forceRefresh = false, trigger = TRIGGER_PERIODIC)
-        if (WidgetConfig.usesPeriodicChain(interval)) {
-            wm.cancelUniqueWork(taskPeriodicWorkName(task.id))
-            val delay = interval.coerceAtLeast(1L)
-            val request =
-                OneTimeWorkRequestBuilder<HomeWidgetRefreshWorker>()
-                    .setInitialDelay(delay, TimeUnit.MINUTES)
-                    .setInputData(input)
-                    .build()
-            wm.enqueueUniqueWork(
-                taskChainWorkName(task.id),
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
-            AppLog.i(TAG, "链式定时 task=${task.id} ${delay}min")
-        } else {
-            wm.cancelUniqueWork(taskChainWorkName(task.id))
-            val minutes =
-                interval.coerceAtLeast(WidgetConfig.WORK_MANAGER_MIN_PERIODIC_MINUTES)
-            val request =
-                PeriodicWorkRequestBuilder<HomeWidgetRefreshWorker>(minutes, TimeUnit.MINUTES)
-                    .setInputData(input)
-                    .build()
-            wm.enqueueUniquePeriodicWork(
-                taskPeriodicWorkName(task.id),
-                ExistingPeriodicWorkPolicy.UPDATE,
-                request,
-            )
-            AppLog.i(TAG, "周期定时 task=${task.id} ${minutes}min")
+    /** 仅重登记 [taskId] 对应闹钟（保存单条任务时用，不影响其它任务）。 */
+    fun scheduleWidgetTask(context: Context, taskId: String) {
+        val appContext = context.applicationContext
+        if (!hasAppWidgets(appContext)) {
+            AppLog.d(TAG, "无 Widget 实例，跳过单任务定时登记 task=$taskId")
+            return
         }
-    }
-
-    fun rescheduleTaskChain(context: Context, task: WidgetTask) {
-        if (!WidgetConfig.usesPeriodicChain(WidgetTaskStore(context).intervalMinutes(task))) return
-        scheduleTaskPeriodic(context, task)
+        val task = WidgetTaskStore(appContext).findTask(taskId)
+        if (task == null) {
+            AppLog.w(TAG, "任务不存在，跳过定时登记 task=$taskId")
+            return
+        }
+        if (task.enabled) {
+            HomeWidgetAlarmScheduler.scheduleNext(appContext, task)
+            AppLog.i(TAG, "已为任务登记闹钟 task=$taskId")
+        } else {
+            HomeWidgetAlarmScheduler.cancel(appContext, task.id)
+            AppLog.i(TAG, "已取消任务闹钟 task=$taskId")
+        }
     }
 
     fun cancelAllWidgetTaskSchedules(context: Context) {
         val appContext = context.applicationContext
-        WidgetTaskStore(appContext).loadTasks().forEach { task ->
-            val wm = WorkManager.getInstance(appContext)
-            wm.cancelUniqueWork(taskPeriodicWorkName(task.id))
-            wm.cancelUniqueWork(taskChainWorkName(task.id))
-            wm.cancelUniqueWork(immediateWorkName(task.id))
-        }
+        HomeWidgetAlarmScheduler.cancelAll(appContext)
         AppLog.i(TAG, "已取消全部任务定时")
+    }
+
+    fun startRefreshService(
+        context: Context,
+        taskId: String?,
+        forceRefresh: Boolean,
+        trigger: String = TRIGGER_IMMEDIATE,
+        runAllEnabled: Boolean = false,
+    ) {
+        val appContext = context.applicationContext
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !HomeWidgetSystemPermissions.canPostNotifications(appContext)
+        ) {
+            AppLog.w(TAG, "未授予通知权限，跳过前台刷新")
+            if (trigger == TRIGGER_PERIODIC && taskId != null) {
+                WidgetTaskStore(appContext).findTask(taskId)?.let { task ->
+                    if (task.enabled) {
+                        HomeWidgetAlarmScheduler.scheduleNext(appContext, task)
+                    }
+                }
+            }
+            Toast.makeText(
+                appContext,
+                appContext.getString(R.string.widget_refresh_need_notification),
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        val intent =
+            Intent(appContext, HomeWidgetRefreshService::class.java).apply {
+                putExtra(EXTRA_TASK_ID, taskId)
+                putExtra(HomeWidgetRefreshService.EXTRA_FORCE_REFRESH, forceRefresh)
+                putExtra(EXTRA_TRIGGER, trigger)
+                putExtra(HomeWidgetRefreshService.EXTRA_RUN_ALL_ENABLED, runAllEnabled)
+            }
+        try {
+            ContextCompat.startForegroundService(appContext, intent)
+            AppLog.i(TAG, "startRefreshService task=$taskId force=$forceRefresh trigger=$trigger")
+        } catch (e: Exception) {
+            AppLog.e(TAG, "启动刷新服务失败 task=$taskId", e)
+        }
     }
 
     fun enqueueImmediateRefresh(
@@ -139,34 +142,20 @@ object HomeWidgetCoordinator {
             taskId?.let { store.findTask(it) }
                 ?: store.loadEnabledTasks().firstOrNull()
                 ?: return
-        AppLog.i(TAG, "enqueueImmediateRefresh task=${task.id} force=$forceRefresh")
-        val request =
-            OneTimeWorkRequestBuilder<HomeWidgetRefreshWorker>()
-                .setInputData(buildWorkerInputData(task.id, forceRefresh = forceRefresh))
-                .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            immediateWorkName(task.id),
-            ExistingWorkPolicy.REPLACE,
-            request,
-        )
+        startRefreshService(context, task.id, forceRefresh, TRIGGER_IMMEDIATE)
     }
 
     fun enqueueInitialRefreshForAllEnabledTasks(context: Context) {
-        WidgetTaskStore(context).loadEnabledTasks().forEach { task ->
-            enqueueImmediateRefresh(context, task.id, forceRefresh = true)
-        }
-    }
-
-    fun buildWorkerInputData(
-        taskId: String,
-        forceRefresh: Boolean,
-        trigger: String = TRIGGER_IMMEDIATE,
-    ): Data =
-        workDataOf(
-            WORK_DATA_TASK_ID to taskId,
-            "force_refresh" to forceRefresh,
-            WORK_DATA_TRIGGER to trigger,
+        val store = WidgetTaskStore(context)
+        if (store.loadEnabledTasks().isEmpty()) return
+        startRefreshService(
+            context = context,
+            taskId = null,
+            forceRefresh = true,
+            trigger = TRIGGER_IMMEDIATE,
+            runAllEnabled = true,
         )
+    }
 
     fun renderAllWidgets(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
@@ -326,16 +315,13 @@ object HomeWidgetCoordinator {
                 this.action = action
                 setPackage(context.packageName)
                 putExtra(EXTRA_APPWIDGET_ID, appWidgetId)
-                taskId?.let { putExtra(WORK_DATA_TASK_ID, it) }
+                taskId?.let { putExtra(EXTRA_TASK_ID, it) }
             }
         return PendingIntent.getBroadcast(
             context,
             requestCode,
             intent,
-            pendingIntentFlags(),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
-
-    private fun pendingIntentFlags(): Int =
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 }

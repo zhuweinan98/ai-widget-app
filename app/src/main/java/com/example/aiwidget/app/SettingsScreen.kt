@@ -1,6 +1,9 @@
 package com.example.aiwidget.app
 
+import android.app.Activity
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -16,8 +19,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,16 +35,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.example.aiwidget.R
 import com.example.aiwidget.data.Presets
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunOutcome
+import com.example.aiwidget.homewidget.HomeWidgetSystemPermissions
 
 /** 我的：后端环境、Widget 定时任务、定时任务执行记录。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,42 +139,10 @@ private fun SettingsSections(state: AppShellUiState, viewModel: AppShellViewMode
     }
 
     SettingsSection(title = "Widget 定时任务") {
-        Text(
-            "共 ${state.widgetTaskEditorRows.size} 条 · 取消启用则不定时且不在 Widget 展示 · 每条点保存生效",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        state.widgetTaskSaveError?.let { error ->
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        if (state.widgetTaskEditorRows.isEmpty()) {
-            Text("暂无任务，点「恢复默认」", style = MaterialTheme.typography.bodySmall)
-        } else {
-            state.widgetTaskEditorRows.forEachIndexed { index, row ->
-                if (index > 0) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                }
-                WidgetTaskEditorRowUi(
-                    row = row,
-                    onTitleChange = { viewModel.updateTaskTitle(row.id, it) },
-                    onPromptChange = { viewModel.updateTaskPrompt(row.id, it) },
-                    onEnabledChange = { viewModel.updateTaskEnabled(row.id, it) },
-                    onIntervalChange = { viewModel.updateTaskInterval(row.id, it) },
-                    onTtlChange = { viewModel.updateTaskCacheTtl(row.id, it) },
-                    onSave = { viewModel.saveWidgetTask(row.id) },
-                )
-            }
-            OutlinedButton(
-                onClick = viewModel::resetWidgetTasksToDefaults,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("恢复默认")
-            }
-        }
+        WidgetTaskEditorSection(state, viewModel)
     }
+
+    WidgetBackgroundRefreshSection()
 
     SettingsSection(
         title = "定时任务执行记录",
@@ -162,7 +150,7 @@ private fun SettingsSections(state: AppShellUiState, viewModel: AppShellViewMode
     ) {
         if (state.widgetPeriodicRunLogs.isEmpty()) {
             Text(
-                "暂无记录（仅记录 WorkManager 定时触发，不含手动 ↻）",
+                "暂无记录（仅记录闹钟定时触发，不含手动 ↻）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -178,6 +166,101 @@ private fun SettingsSections(state: AppShellUiState, viewModel: AppShellViewMode
             }
         }
     }
+}
+
+@Composable
+private fun WidgetTaskEditorSection(state: AppShellUiState, viewModel: AppShellViewModel) {
+    val rows = state.widgetTaskEditorRows
+    var taskMenuExpanded by remember { mutableStateOf(false) }
+    var selectedTaskId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(rows.map { it.id }) {
+        if (selectedTaskId == null || rows.none { it.id == selectedTaskId }) {
+            selectedTaskId = rows.firstOrNull()?.id
+        }
+    }
+
+    Text(
+        "共 ${rows.size} 条 · 取消启用则不定时且不在 Widget 展示 · 编辑后点保存",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    state.widgetTaskSaveError?.let { error ->
+        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
+    if (rows.isEmpty()) {
+        Text("暂无任务，点「恢复默认」", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(
+            onClick = viewModel::resetWidgetTasksToDefaults,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("恢复默认")
+        }
+        return
+    }
+
+    val selectedRow = rows.find { it.id == selectedTaskId }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedRow?.let { taskDropdownLabel(it) }.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("选择任务") },
+            trailingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Box(
+            modifier =
+                Modifier
+                    .matchParentSize()
+                    .clickable { taskMenuExpanded = !taskMenuExpanded },
+        )
+        DropdownMenu(
+            expanded = taskMenuExpanded,
+            onDismissRequest = { taskMenuExpanded = false },
+        ) {
+            rows.forEach { row ->
+                DropdownMenuItem(
+                    text = { Text(taskDropdownLabel(row)) },
+                    onClick = {
+                        selectedTaskId = row.id
+                        taskMenuExpanded = false
+                    },
+                )
+            }
+        }
+    }
+
+    selectedRow?.let { row ->
+        WidgetTaskEditorRowUi(
+            row = row,
+            onTitleChange = { viewModel.updateTaskTitle(row.id, it) },
+            onPromptChange = { viewModel.updateTaskPrompt(row.id, it) },
+            onEnabledChange = { viewModel.updateTaskEnabled(row.id, it) },
+            onIntervalChange = { viewModel.updateTaskInterval(row.id, it) },
+            onTtlChange = { viewModel.updateTaskCacheTtl(row.id, it) },
+            onSave = { viewModel.saveWidgetTask(row.id) },
+        )
+    }
+
+    OutlinedButton(
+        onClick = viewModel::resetWidgetTasksToDefaults,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("恢复默认")
+    }
+}
+
+private fun taskDropdownLabel(row: WidgetTaskEditorRow): String {
+    val status = if (row.enabled) "已启用" else "未启用"
+    val title = row.title.ifBlank { row.id }
+    return "$title · $status"
 }
 
 /** 单条 Widget 任务在设置页的编辑表单。 */
@@ -214,7 +297,7 @@ private fun WidgetTaskEditorRowUi(
             value = row.prompt,
             onValueChange = onPromptChange,
             label = { Text("任务内容（自然语言）") },
-            supportingText = { Text("执行时会自动追加 Widget 展示格式要求") },
+            supportingText = { Text("原样作为 /widget/run 的 message；展示格式由服务端决定") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 4,
@@ -331,4 +414,106 @@ private fun formatTimestamp(ms: Long, includeSeconds: Boolean): String {
     if (ms <= 0L) return "--"
     val pattern = if (includeSeconds) "HH:mm:ss" else "HH:mm"
     return java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()).format(java.util.Date(ms))
+}
+
+@Composable
+private fun WidgetBackgroundRefreshSection() {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var notificationOk by remember {
+        mutableStateOf(HomeWidgetSystemPermissions.canPostNotifications(context))
+    }
+    var exactAlarmOk by remember {
+        mutableStateOf(HomeWidgetSystemPermissions.canScheduleExactAlarms(context))
+    }
+    var batteryOk by remember {
+        mutableStateOf(HomeWidgetSystemPermissions.isIgnoringBatteryOptimizations(context))
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    notificationOk = HomeWidgetSystemPermissions.canPostNotifications(context)
+                    exactAlarmOk = HomeWidgetSystemPermissions.canScheduleExactAlarms(context)
+                    batteryOk = HomeWidgetSystemPermissions.isIgnoringBatteryOptimizations(context)
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    SettingsSection(title = stringResource(R.string.widget_background_refresh_title)) {
+        Text(
+            stringResource(R.string.widget_background_refresh_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (notificationOk) {
+                stringResource(R.string.widget_notification_granted)
+            } else {
+                stringResource(R.string.widget_notification_denied)
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            if (exactAlarmOk) {
+                stringResource(R.string.widget_exact_alarm_granted)
+            } else {
+                stringResource(R.string.widget_exact_alarm_denied)
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            if (batteryOk) {
+                stringResource(R.string.widget_battery_opt_granted)
+            } else {
+                stringResource(R.string.widget_battery_opt_denied)
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    if (notificationOk) {
+                        HomeWidgetSystemPermissions.openNotificationSettings(context)
+                    } else if (activity != null) {
+                        HomeWidgetSystemPermissions.requestPostNotifications(activity)
+                    } else {
+                        HomeWidgetSystemPermissions.openNotificationSettings(context)
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(
+                        if (notificationOk) {
+                            R.string.widget_open_notification_settings
+                        } else {
+                            R.string.widget_open_notification
+                        },
+                    ),
+                )
+            }
+            OutlinedButton(
+                onClick = { HomeWidgetSystemPermissions.openExactAlarmSettings(context) },
+                modifier = Modifier.weight(1f),
+                enabled = !exactAlarmOk,
+            ) {
+                Text(stringResource(R.string.widget_open_exact_alarm))
+            }
+        }
+        OutlinedButton(
+            onClick = { HomeWidgetSystemPermissions.requestIgnoreBatteryOptimizations(context) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !batteryOk,
+        ) {
+            Text(stringResource(R.string.widget_open_battery_opt))
+        }
+    }
 }

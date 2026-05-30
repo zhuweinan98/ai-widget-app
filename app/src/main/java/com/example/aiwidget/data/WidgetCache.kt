@@ -24,7 +24,7 @@ class WidgetCache(context: Context) {
 
     fun getSubtitle(slot: String): String? = prefs.getString("${slot}_subtitle", null)
 
-    /** 本地配图绝对路径（Worker 下载后写入）。 */
+    /** 本地配图绝对路径（刷新时下载后写入）。 */
     fun getImagePath(slot: String): String? = prefs.getString("${slot}_image_path", null)
 
     fun getRawContent(slot: String): String? = prefs.getString("${slot}_raw_content", null)

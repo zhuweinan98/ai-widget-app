@@ -1,51 +1,54 @@
 package com.example.aiwidget.homewidget
 
-import android.widget.Toast
-import androidx.work.CoroutineWorker
-import androidx.work.WorkerParameters
-import com.example.aiwidget.R
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.example.aiwidget.data.AppPrefs
 import com.example.aiwidget.data.WidgetRunRequest
 import com.example.aiwidget.data.WidgetCache
-import com.example.aiwidget.data.validateForWidget
 import com.example.aiwidget.data.WidgetResult
 import com.example.aiwidget.data.WidgetRunLogEntry
 import com.example.aiwidget.data.WidgetRunLogStore
 import com.example.aiwidget.data.WidgetRunOutcome
 import com.example.aiwidget.data.WidgetTask
 import com.example.aiwidget.data.WidgetTaskStore
+import com.example.aiwidget.data.validateForWidget
 import com.example.aiwidget.network.AgentRepository
 import com.example.aiwidget.util.AppLog
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
-/**
- * WorkManager Worker：拉取 Agent 结果并写入 [WidgetCache]。
- *
- * 定时（periodic）触发时会追加 [WidgetRunLogStore] 记录；手动 ↻ 不写日志。
- */
-class HomeWidgetRefreshWorker(
-    appContext: android.content.Context,
-    workerParams: WorkerParameters,
-) : CoroutineWorker(appContext, workerParams) {
+/** 拉取 Agent 结果并写入 [WidgetCache]；由 [HomeWidgetRefreshService] 在前台执行。 */
+object HomeWidgetRefreshRunner {
+    private const val TAG = "HomeWidgetRefreshRunner"
+    private const val PROMPT_LOG_MAX = 500
+    private const val ERROR_LOG_MAX = 300
+    private const val TITLE_LOG_MAX = 120
 
     private val agentRepository = AgentRepository()
 
-    override suspend fun doWork(): Result {
-        val taskStore = WidgetTaskStore(applicationContext)
-        val taskId = inputData.getString(HomeWidgetCoordinator.WORK_DATA_TASK_ID)
+    suspend fun run(
+        context: Context,
+        taskId: String?,
+        forceRefresh: Boolean,
+        trigger: String,
+        runAllEnabled: Boolean = false,
+    ) {
+        val appContext = context.applicationContext
+        if (runAllEnabled) {
+            runAllEnabledTasks(appContext, forceRefresh)
+            return
+        }
+
+        val taskStore = WidgetTaskStore(appContext)
         val task =
             taskId?.let { taskStore.findTask(it) }
                 ?: taskStore.loadEnabledTasks().firstOrNull()
         if (task == null) {
             AppLog.w(TAG, "无可用任务 task_id=$taskId")
-            HomeWidgetCoordinator.renderAllWidgets(applicationContext)
-            return Result.failure()
+            HomeWidgetCoordinator.renderAllWidgets(appContext)
+            return
         }
 
-        val forceRefresh = inputData.getBoolean("force_refresh", false)
-        val isPeriodicTrigger =
-            inputData.getString(HomeWidgetCoordinator.WORK_DATA_TRIGGER) == HomeWidgetCoordinator.TRIGGER_PERIODIC
+        val isPeriodicTrigger = trigger == HomeWidgetCoordinator.TRIGGER_PERIODIC
         val cacheTtlSeconds = taskStore.cacheTtlSeconds(task)
 
         if (isPeriodicTrigger) {
@@ -53,27 +56,67 @@ class HomeWidgetRefreshWorker(
                 TAG,
                 "定时 task=${task.id} interval=${taskStore.intervalMinutes(task)}min TTL=${cacheTtlSeconds}s",
             )
-            showToast(R.string.widget_periodic_started)
         }
 
-        return try {
-            executeRefresh(task, cacheTtlSeconds, forceRefresh, isPeriodicTrigger)
+        try {
+            if (!isNetworkAvailable(appContext)) {
+                AppLog.w(TAG, "无网络，跳过刷新 task=${task.id}")
+                if (isPeriodicTrigger) {
+                    appendPeriodicLog(
+                        appContext,
+                        task,
+                        outcome = WidgetRunOutcome.API_FAILURE,
+                        status = "error",
+                        errorMsg = "无网络连接",
+                    )
+                }
+                return
+            }
+            executeRefresh(appContext, task, cacheTtlSeconds, forceRefresh, isPeriodicTrigger)
         } finally {
-            if (isPeriodicTrigger) {
-                HomeWidgetCoordinator.rescheduleTaskChain(applicationContext, task)
+            if (isPeriodicTrigger && task.enabled) {
+                HomeWidgetAlarmScheduler.scheduleNext(appContext, task)
             }
         }
     }
 
+    private suspend fun runAllEnabledTasks(
+        context: Context,
+        forceRefresh: Boolean,
+    ) {
+        val taskStore = WidgetTaskStore(context)
+        val tasks = taskStore.loadEnabledTasks()
+        if (tasks.isEmpty()) {
+            AppLog.w(TAG, "无已启用任务，跳过批量刷新")
+            HomeWidgetCoordinator.renderAllWidgets(context)
+            return
+        }
+        if (!isNetworkAvailable(context)) {
+            AppLog.w(TAG, "无网络，跳过批量刷新")
+            return
+        }
+        AppLog.i(TAG, "批量刷新 ${tasks.size} 条已启用任务")
+        tasks.forEach { task ->
+            executeRefresh(
+                context,
+                task,
+                taskStore.cacheTtlSeconds(task),
+                forceRefresh,
+                isPeriodicTrigger = false,
+            )
+        }
+    }
+
     private suspend fun executeRefresh(
+        context: Context,
         task: WidgetTask,
         cacheTtlSeconds: Int,
         forceRefresh: Boolean,
         isPeriodicTrigger: Boolean,
-    ): Result {
+    ) {
         val cacheSlot = task.cacheSlot
-        val widgetCache = WidgetCache(applicationContext)
-        val appPrefs = AppPrefs(applicationContext)
+        val widgetCache = WidgetCache(context)
+        val appPrefs = AppPrefs(context)
         val userId = appPrefs.getOrCreateUserId()
         val now = System.currentTimeMillis()
         val lastSuccessAt = widgetCache.getLastSuccessTimestamp(cacheSlot)
@@ -83,37 +126,43 @@ class HomeWidgetRefreshWorker(
             AppLog.d(TAG, "缓存未过期，跳过 API task=${task.id} slot=$cacheSlot")
             if (isPeriodicTrigger) {
                 appendPeriodicLog(
+                    context,
                     task,
                     outcome = WidgetRunOutcome.CACHE_SKIPPED,
                     status = "skipped",
                 )
-                showToast(R.string.widget_periodic_skipped)
             } else {
-                HomeWidgetCoordinator.renderAllWidgets(applicationContext)
+                HomeWidgetCoordinator.renderAllWidgets(context)
             }
-            return Result.success()
+            return
         }
 
         widgetCache.setRefreshing(cacheSlot, true)
-        HomeWidgetCoordinator.renderAllWidgets(applicationContext)
+        HomeWidgetCoordinator.renderAllWidgets(context)
 
-        return try {
-            val trigger =
-                inputData.getString(HomeWidgetCoordinator.WORK_DATA_TRIGGER) ?: HomeWidgetCoordinator.TRIGGER_IMMEDIATE
+        try {
             val agentMessage = task.prompt.trim()
             if (agentMessage.isEmpty()) {
                 AppLog.w(TAG, "任务 prompt 为空 task=${task.id}")
-                return handleRefreshFailure(widgetCache, task)
+                handleRefreshFailure(context, widgetCache, task)
+                return
             }
             val result =
                 agentRepository.widgetRun(
                     baseUrl = appPrefs.baseUrl,
                     apiKey = appPrefs.apiKey,
                     request = WidgetRunRequest(userId = userId, message = agentMessage),
-                    source = "widget/${task.id}/$trigger",
+                    source = "widget/${task.id}/${
+                        if (isPeriodicTrigger) {
+                            HomeWidgetCoordinator.TRIGGER_PERIODIC
+                        } else {
+                            HomeWidgetCoordinator.TRIGGER_IMMEDIATE
+                        }
+                    }",
                 )
             if (isPeriodicTrigger) {
                 appendPeriodicLog(
+                    context,
                     task,
                     outcome =
                         if (result.status == "ok") {
@@ -133,6 +182,7 @@ class HomeWidgetRefreshWorker(
                     AppLog.w(TAG, "Widget 终局无效 task=${task.id}: $validationError")
                     if (isPeriodicTrigger) {
                         appendPeriodicLog(
+                            context,
                             task,
                             outcome = WidgetRunOutcome.API_ERROR,
                             status = result.status,
@@ -141,15 +191,15 @@ class HomeWidgetRefreshWorker(
                             result = result,
                         )
                     }
-                    handleRefreshFailure(widgetCache, task)
-                    return Result.success()
+                    handleRefreshFailure(context, widgetCache, task)
+                    return
                 }
                 val finishedAtMs = System.currentTimeMillis()
                 val title = HomeWidgetDisplayFormatter.formatTitle(result.title, task.title)
                 val timeLabel = HomeWidgetDisplayFormatter.formatRefreshTime(finishedAtMs)
                 val imagePath =
                     HomeWidgetImageLoader.download(
-                        applicationContext,
+                        context,
                         cacheSlot,
                         result.imageUrl,
                     )
@@ -170,28 +220,43 @@ class HomeWidgetRefreshWorker(
                     timeLabel,
                     finishedAtMs,
                 )
-                HomeWidgetCoordinator.renderAllWidgets(applicationContext)
+                HomeWidgetCoordinator.renderAllWidgets(context)
                 AppLog.d(TAG, "刷新成功 task=${task.id} slot=$cacheSlot")
-                Result.success()
             } else {
                 AppLog.w(TAG, "API status=${result.status} ${result.errorMsg}")
-                handleRefreshFailure(widgetCache, task)
+                handleRefreshFailure(context, widgetCache, task)
             }
         } catch (e: Exception) {
             AppLog.e(TAG, "刷新失败 task=${task.id}", e)
             if (isPeriodicTrigger) {
                 appendPeriodicLog(
+                    context,
                     task,
                     outcome = WidgetRunOutcome.API_FAILURE,
                     status = "error",
                     errorMsg = e.message ?: e.toString(),
                 )
             }
-            handleRefreshFailure(widgetCache, task)
+            handleRefreshFailure(context, widgetCache, task)
+        }
+    }
+
+    private fun handleRefreshFailure(
+        context: Context,
+        widgetCache: WidgetCache,
+        task: WidgetTask,
+    ) {
+        widgetCache.setRefreshing(task.cacheSlot, false)
+        if (widgetCache.hasCachedContent(task.cacheSlot)) {
+            HomeWidgetCoordinator.renderAllWidgets(context)
+        } else {
+            AppLog.w(TAG, "刷新失败且无缓存 task=${task.id}")
+            HomeWidgetCoordinator.renderAllWidgets(context)
         }
     }
 
     private fun appendPeriodicLog(
+        context: Context,
         task: WidgetTask,
         outcome: String,
         status: String,
@@ -199,7 +264,7 @@ class HomeWidgetRefreshWorker(
         title: String = "",
         result: WidgetResult? = null,
     ) {
-        WidgetRunLogStore(applicationContext).append(
+        WidgetRunLogStore(context).append(
             WidgetRunLogEntry(
                 finishedAtMs = System.currentTimeMillis(),
                 taskId = task.id,
@@ -212,28 +277,10 @@ class HomeWidgetRefreshWorker(
         )
     }
 
-    private fun handleRefreshFailure(widgetCache: WidgetCache, task: WidgetTask): Result {
-        widgetCache.setRefreshing(task.cacheSlot, false)
-        return if (widgetCache.hasCachedContent(task.cacheSlot)) {
-            HomeWidgetCoordinator.renderAllWidgets(applicationContext)
-            Result.success()
-        } else {
-            AppLog.w(TAG, "刷新失败且无缓存 task=${task.id}")
-            HomeWidgetCoordinator.renderAllWidgets(applicationContext)
-            Result.retry()
-        }
-    }
-
-    private suspend fun showToast(messageResId: Int) {
-        withContext(Dispatchers.Main) {
-            Toast.makeText(applicationContext, messageResId, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    companion object {
-        private const val TAG = "HomeWidgetRefreshWorker"
-        private const val PROMPT_LOG_MAX = 500
-        private const val ERROR_LOG_MAX = 300
-        private const val TITLE_LOG_MAX = 120
+    private fun isNetworkAvailable(context: Context): Boolean {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return true
+        val network = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

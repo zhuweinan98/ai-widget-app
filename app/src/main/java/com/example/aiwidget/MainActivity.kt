@@ -13,7 +13,7 @@ import com.example.aiwidget.app.AppShellScreen
 import com.example.aiwidget.app.AppShellViewModel
 import com.example.aiwidget.app.theme.AIWidgetTheme
 import com.example.aiwidget.data.AppPrefs
-import com.example.aiwidget.homewidget.HomeWidgetCoordinator
+import com.example.aiwidget.homewidget.HomeWidgetSystemPermissions
 
 /**
  * 应用唯一 Activity：挂载 [com.example.aiwidget.app.AppShellScreen]。
@@ -27,12 +27,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppPrefs(this).getOrCreateUserId()
-        HomeWidgetCoordinator.scheduleEnabledWidgetTasks(this)
         enableEdgeToEdge()
         setContent {
             AIWidgetTheme {
                 val viewModel: AppShellViewModel = viewModel()
                 val activity = LocalContext.current as MainActivity
+
+                LaunchedEffect(Unit) {
+                    HomeWidgetSystemPermissions.requestPostNotifications(activity)
+                }
 
                 DisposableEffect(viewModel) {
                     activity.widgetOpenHandler = { viewModel.onLaunch(fromWidget = true, widgetTaskId = widgetTaskId()) }

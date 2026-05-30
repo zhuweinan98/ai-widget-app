@@ -29,7 +29,6 @@ class HomeWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray,
     ) {
-        HomeWidgetCoordinator.scheduleEnabledWidgetTasks(context)
         HomeWidgetCoordinator.renderAllWidgets(context)
     }
 
@@ -44,7 +43,7 @@ class HomeWidgetProvider : AppWidgetProvider() {
         AppLog.d(TAG, "onReceive action=$action extras=${intent.extras?.keySet()}")
         when (action) {
             HomeWidgetCoordinator.ACTION_MANUAL_REFRESH -> {
-                val taskId = intent.getStringExtra(HomeWidgetCoordinator.WORK_DATA_TASK_ID)
+                val taskId = intent.getStringExtra(HomeWidgetCoordinator.EXTRA_TASK_ID)
                 AppLog.i(TAG, "手动刷新 task=$taskId")
                 Toast.makeText(context, context.getString(R.string.widget_refresh_started), Toast.LENGTH_SHORT)
                     .show()
@@ -66,7 +65,7 @@ class HomeWidgetProvider : AppWidgetProvider() {
                 return
             }
             HomeWidgetCoordinator.ACTION_OPEN_FROM_WIDGET -> {
-                val taskId = intent.getStringExtra(HomeWidgetCoordinator.WORK_DATA_TASK_ID)
+                val taskId = intent.getStringExtra(HomeWidgetCoordinator.EXTRA_TASK_ID)
                 AppLog.i(TAG, "打开 App task=$taskId")
                 val open =
                     Intent(context, MainActivity::class.java).apply {

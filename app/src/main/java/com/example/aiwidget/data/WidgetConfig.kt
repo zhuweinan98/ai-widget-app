@@ -15,12 +15,6 @@ object WidgetConfig {
     /** 默认定时刷新间隔：60 分钟。 */
     const val DEFAULT_PERIODIC_INTERVAL_MINUTES = 60L
 
-    /** WorkManager PeriodicWork 最短 15 分钟；更短间隔用链式 OneTimeWork。 */
-    const val WORK_MANAGER_MIN_PERIODIC_MINUTES = 15L
-
-    fun usesPeriodicChain(intervalMinutes: Long): Boolean =
-        intervalMinutes < WORK_MANAGER_MIN_PERIODIC_MINUTES
-
     const val HEADLINE_MAX_ITEMS = 5
     const val TITLE_MAX_CHARS = 28
 }

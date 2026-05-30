@@ -2,7 +2,7 @@ package com.example.aiwidget.data
 
 /**
  * Widget 定时任务：标题 + 用户自然语言 prompt + 定时间隔 + 独立缓存槽。
- * 执行时 Worker 将 [prompt] 作为 `/widget/run` 的 message（格式后缀由后端拼接）。
+ * 执行时将 [prompt] 原样作为 `/widget/run` 的 message。
  */
 data class WidgetTask(
     val id: String,
@@ -12,7 +12,7 @@ data class WidgetTask(
     val prompt: String,
     /** [WidgetCache] 分区键；多任务可共用或独立 slot。 */
     val cacheSlot: String,
-    /** false 时不登记 WorkManager 定时。 */
+    /** false 时不登记闹钟定时。 */
     val enabled: Boolean = true,
     val intervalMinutes: Long = WidgetConfig.DEFAULT_PERIODIC_INTERVAL_MINUTES,
     val cacheTtlSeconds: Int = WidgetConfig.DEFAULT_CACHE_TTL_SECONDS,

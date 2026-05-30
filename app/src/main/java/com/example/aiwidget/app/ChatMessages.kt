@@ -138,7 +138,7 @@ fun ChatMessageList(
         items(items = messages, key = { it.id }) { msg ->
             when (msg.role) {
                 ChatRole.User -> UserMessageRow(msg, expandedMessageIds.contains(msg.id), onToggleExpand)
-                ChatRole.Agent -> AgentMessageRow(msg, onLinkClick)
+                ChatRole.Agent -> AgentMessageRow(msg, expandedMessageIds.contains(msg.id), onToggleExpand, onLinkClick)
             }
         }
     }
@@ -255,17 +255,11 @@ fun TracePanel(
 /** 将 [ChatResponse] 转为 Agent 侧聊天气泡（含错误态）。 */
 fun chatMessageFromChatResponse(result: ChatResponse): ChatMessage {
     val fullText = agentTurnDisplayText(result.title, result.content, result.errorMsg)
-    val summary =
-        if (fullText.length <= 200) {
-            fullText
-        } else {
-            fullText.take(200) + "…"
-        }
     return ChatMessage(
         id = UUID.randomUUID().toString(),
         role = ChatRole.Agent,
         kind = if (result.status == "error") ChatKind.Error else ChatKind.Result,
-        summary = summary,
+        summary = summarizeAgentPreview(fullText),
         fullText = fullText,
         timestampMs = ChatTimeFormat.toEpochMillis(result.updatedAt),
     )
@@ -289,16 +283,18 @@ fun StoredChatMessage.toChatMessage(): ChatMessage {
                 id = localId,
                 role = ChatRole.Agent,
                 kind = ChatKind.Result,
-                summary =
-                    if (content.length <= 200) {
-                        content
-                    } else {
-                        content.take(200) + "…"
-                    },
+                summary = summarizeAgentPreview(content),
                 fullText = content,
                 timestampMs = timestampMs,
             )
     }
+}
+
+/** Agent 气泡折叠预览；全文见 [ChatMessage.fullText]。 */
+private fun summarizeAgentPreview(text: String, maxLen: Int = 200): String {
+    val body = text.trim()
+    if (body.isEmpty()) return "(空)"
+    return if (body.length <= maxLen) body else body.take(maxLen) + "…"
 }
 
 @Composable
@@ -351,8 +347,11 @@ private fun UserMessageRow(
 @Composable
 private fun AgentMessageRow(
     message: ChatMessage,
+    expanded: Boolean,
+    onToggleExpand: (String) -> Unit,
     onLinkClick: (String) -> Unit,
 ) {
+    val canExpand = message.fullText.length > message.summary.length
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
@@ -369,7 +368,21 @@ private fun AgentMessageRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ChatBubble(background = AgentBubble) {
-                AgentBubbleBody(message, onLinkClick)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AgentBubbleBody(
+                        message = message,
+                        markdown = if (expanded || !canExpand) message.fullText else message.summary,
+                        onLinkClick = onLinkClick,
+                    )
+                    if (canExpand) {
+                        TextButton(
+                            onClick = { onToggleExpand(message.id) },
+                            modifier = Modifier.padding(0.dp),
+                        ) {
+                            Text(if (expanded) "收起" else "展开全文", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
         }
     }
@@ -378,6 +391,7 @@ private fun AgentMessageRow(
 @Composable
 private fun AgentBubbleBody(
     message: ChatMessage,
+    markdown: String,
     onLinkClick: (String) -> Unit,
 ) {
     val color =
@@ -388,14 +402,14 @@ private fun AgentBubbleBody(
     when (message.kind) {
         ChatKind.Result, ChatKind.Error ->
             ChatMarkdownText(
-                markdown = message.summary,
+                markdown = markdown,
                 color = color,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 onLinkClick = onLinkClick,
             )
         else ->
             Text(
-                message.summary,
+                markdown,
                 style = MaterialTheme.typography.bodyMedium,
                 color = color,
             )

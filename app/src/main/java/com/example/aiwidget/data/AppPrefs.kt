@@ -13,37 +13,6 @@ class AppPrefs(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    init {
-        migrateFromLegacySessionPrefs()
-        migrateUserIdFromLegacyKeys()
-    }
-
-    /** 从旧版 SessionPrefs 文件迁移 baseUrl/apiKey（仅首次）。 */
-    private fun migrateFromLegacySessionPrefs() {
-        if (prefs.contains(KEY_BASE_URL)) return
-        val legacy = appContext.getSharedPreferences(SessionPrefs.PREFS_NAME, Context.MODE_PRIVATE)
-        legacy.getString("base_url", null)?.let { prefs.edit().putString(KEY_BASE_URL, it).apply() }
-        legacy.getString("api_key", null)?.let { prefs.edit().putString(KEY_API_KEY, it).apply() }
-    }
-
-    /** 合并旧 `user_uuid` / SessionPrefs `user_id` 到统一 [KEY_USER_ID]。 */
-    private fun migrateUserIdFromLegacyKeys() {
-        if (prefs.getString(KEY_USER_ID, null)?.isNotBlank() == true) return
-        val fromUuid = prefs.getString(KEY_USER_UUID_LEGACY, null)?.trim().orEmpty()
-        if (fromUuid.isNotBlank()) {
-            prefs.edit().putString(KEY_USER_ID, fromUuid).apply()
-            return
-        }
-        val session =
-            appContext.getSharedPreferences(SessionPrefs.PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_USER_ID_LEGACY_SESSION, null)
-                ?.trim()
-                .orEmpty()
-        if (session.isNotBlank()) {
-            prefs.edit().putString(KEY_USER_ID, session).apply()
-        }
-    }
-
     var baseUrl: String
         get() = prefs.getString(KEY_BASE_URL, Presets.DEFAULT_BASE_URL) ?: Presets.DEFAULT_BASE_URL
         set(value) = prefs.edit().putString(KEY_BASE_URL, value.trim()).apply()
@@ -73,8 +42,5 @@ class AppPrefs(context: Context) {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_USER_ID = "user_id"
-        /** 旧 Widget 专用字段，迁移后不再写入。 */
-        private const val KEY_USER_UUID_LEGACY = "user_uuid"
-        private const val KEY_USER_ID_LEGACY_SESSION = "user_id"
     }
 }
